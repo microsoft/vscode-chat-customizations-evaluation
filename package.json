@@ -23,6 +23,16 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pierceboggan/prompt-lsp"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "dependencies": {
     "tiktoken": "^1.0.22",
     "vscode-languageserver": "^9.0.1",
