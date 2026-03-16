@@ -1,11 +1,13 @@
 {
   "name": "prompt-lsp",
   "version": "1.0.0",
+  "publisher": "prompt-lsp",
   "description": "Language Server Protocol implementation for analyzing, validating, and improving AI prompts",
   "main": "./out/server.js",
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "bundle": "tsc -p ./ && esbuild ./out/server.js --bundle --outfile=./out/server.bundled.js --platform=node --format=cjs --external:tiktoken && mv ./out/server.bundled.js ./out/server.js",
     "build": "npm run compile && cd client && npm run compile",
     "build:all": "npm run compile && cd client && npm install && npm run compile",
     "test": "vitest run",
@@ -23,6 +25,16 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pierceboggan/prompt-lsp"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "dependencies": {
     "tiktoken": "^1.0.22",
     "vscode-languageserver": "^9.0.1",
@@ -32,6 +44,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^25.1.0",
+    "esbuild": "^0.25.0",
     "eslint": "^9.39.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.55.0",
