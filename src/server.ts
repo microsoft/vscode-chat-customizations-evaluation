@@ -154,6 +154,13 @@ connection.onInitialized(() => {
 
   // Fetch initial configuration
   updateConfiguration();
+
+  // Re-run full analysis (with LLM) for documents opened before the proxy was ready.
+  // onDidOpen fires during the initial handshake — before onInitialized — so the LLM
+  // proxy isn't wired up yet and llmAnalyzer.isAvailable() returns false on first open.
+  for (const doc of documents.all()) {
+    runFullAnalysis(doc, { skipLLM: false });
+  }
 });
 
 // Watch for configuration changes
