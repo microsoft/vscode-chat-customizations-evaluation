@@ -2,12 +2,17 @@
   "name": "prompt-lsp",
   "version": "1.0.0",
   "publisher": "prompt-lsp",
+  "displayName": "Prompt LSP",
   "description": "Language Server Protocol implementation for analyzing, validating, and improving AI prompts",
-  "main": "./out/server.js",
+  "main": "./client/out/extension.js",
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "bundle": "tsc -p ./ && esbuild ./out/server.js --bundle --outfile=./out/server.bundled.js --platform=node --format=cjs --external:tiktoken && mv ./out/server.bundled.js ./out/server.js",
+    "bundle": "tsc -p ./ && esbuild ./out/server.js --bundle --outfile=./out/server.bundled.js --platform=node --format=cjs --external:tiktoken && mv ./out/server.bundled.js ./out/server.js && mkdir -p ./out/node_modules && cp -r ./node_modules/tiktoken ./out/node_modules/tiktoken",
     "build": "npm run compile && cd client && npm run compile",
     "build:all": "npm run compile && cd client && npm install && npm run compile",
     "test": "vitest run",
@@ -35,6 +40,69 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "prompt",
+        "aliases": [
+          "AI Prompt",
+          "prompt"
+        ],
+        "extensions": [
+          ".prompt.md",
+          ".system.md",
+          ".agent.md",
+          ".prompt"
+        ],
+        "configuration": "./client/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "prompt",
+        "scopeName": "text.prompt",
+        "path": "./client/syntaxes/prompt.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Prompt LSP",
+      "properties": {
+        "promptLSP.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the Prompt LSP extension"
+        },
+        "promptLSP.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "promptLSP.analyzePrompt",
+        "title": "Analyze Prompt",
+        "category": "Prompt LSP"
+      },
+      {
+        "command": "promptLSP.showTokenCount",
+        "title": "Show Token Count",
+        "category": "Prompt LSP"
+      },
+      {
+        "command": "promptLSP.clearCache",
+        "title": "Clear Analysis Cache",
+        "category": "Prompt LSP"
+      }
+    ]
+  },
   "dependencies": {
     "tiktoken": "^1.0.22",
     "vscode-languageserver": "^9.0.1",
