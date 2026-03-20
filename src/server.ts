@@ -553,6 +553,33 @@ connection.onCodeAction((params) => {
     }
   }
 
+  // Offer "Fix all diagnostics" when there are fixable prompt-lsp diagnostics
+  const excludedAnalyzers = new Set(['frontmatter-validation', 'variable-validation']);
+  const excludedCodes = new Set([
+    'llm-disabled', 'llm-error',
+    'composition-unresolved', 'composition-missing',
+    'undefined-variable', 'empty-variable',
+  ]);
+
+  const hasFixable = params.context.diagnostics.some((d) => {
+    if (!d.source?.startsWith('prompt-lsp')) return false;
+    const analyzer = d.source.match(/\(([^)]+)\)/)?.[1];
+    if (analyzer && excludedAnalyzers.has(analyzer)) return false;
+    if (typeof d.code === 'string' && excludedCodes.has(d.code)) return false;
+    return true;
+  });
+
+  if (hasFixable) {
+    codeActions.push({
+      title: 'Fix all diagnostics in file (LLM)',
+      kind: CodeActionKind.QuickFix,
+      command: {
+        title: 'Fix all diagnostics in file (LLM)',
+        command: 'promptLSP.fixAllDiagnostics',
+      },
+    });
+  }
+
   return codeActions;
 });
 
@@ -600,6 +627,32 @@ connection.onNotification('promptLSP/analyze', (params: { uri: string }) => {
     connection.console.log(`[Analysis] No document found for ${params.uri}`);
   }
 });
+
+// Fix diagnostics request — uses LLM to fix all listed issues in the document
+connection.onRequest(
+  'promptLSP/fixDiagnostics',
+  async (params: { uri: string; diagnostics: { code: string; message: string; line: number }[] }): Promise<{ text: string | null; error?: string }> => {
+    const document = documents.get(params.uri);
+    if (!document) {
+      return { text: null, error: 'Document not found' };
+    }
+
+    if (!llmAnalyzer.isAvailable()) {
+      return { text: null, error: 'LLM not available. Install GitHub Copilot to use fix commands.' };
+    }
+
+    const promptDoc = getCachedPromptDocument(document);
+    connection.console.log(`[Fix] Fixing ${params.diagnostics.length} diagnostic(s) in ${params.uri}`);
+
+    const fixedText = await llmAnalyzer.fixDiagnostics(promptDoc, params.diagnostics);
+    if (!fixedText) {
+      return { text: null, error: 'Failed to generate fixes' };
+    }
+
+    connection.console.log(`[Fix] Generated fixed document (${fixedText.length} chars)`);
+    return { text: fixedText };
+  },
+);
 
 // Token count request for client status bar
 connection.onRequest('promptLSP/tokenCount', (params: { uri: string }): number => {

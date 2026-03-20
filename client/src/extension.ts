@@ -146,6 +146,74 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('promptLSP.fixAllDiagnostics', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      const uri = editor.document.uri;
+      const allDiagnostics = vscode.languages.getDiagnostics(uri);
+
+      // Analyzers and codes excluded from fixing
+      const excludedAnalyzers = ['frontmatter-validation', 'variable-validation'];
+      const excludedCodes = new Set([
+        'llm-disabled', 'llm-error',
+        'composition-unresolved', 'composition-missing',
+        'undefined-variable', 'empty-variable',
+      ]);
+
+      const fixable = allDiagnostics.filter((d) => {
+        if (!d.source?.startsWith('prompt-lsp')) return false;
+        const analyzer = d.source.match(/\(([^)]+)\)/)?.[1];
+        if (analyzer && excludedAnalyzers.includes(analyzer)) return false;
+        const code = typeof d.code === 'object' ? String(d.code.value) : String(d.code ?? '');
+        if (excludedCodes.has(code)) return false;
+        return true;
+      });
+
+      if (fixable.length === 0) {
+        vscode.window.showInformationMessage('No fixable diagnostics found in this file.');
+        return;
+      }
+
+      const diagnosticInfo = fixable.map((d) => ({
+        code: typeof d.code === 'object' ? String(d.code.value) : String(d.code ?? ''),
+        message: d.message,
+        line: d.range.start.line,
+      }));
+
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Fixing diagnostics...', cancellable: false },
+        async () => {
+          try {
+            const result = await client.sendRequest<{ text: string | null; error?: string }>(
+              'promptLSP/fixDiagnostics',
+              { uri: uri.toString(), diagnostics: diagnosticInfo },
+            );
+
+            if (result.error) {
+              vscode.window.showErrorMessage(`Fix failed: ${result.error}`);
+              return;
+            }
+
+            if (result.text) {
+              const edit = new vscode.WorkspaceEdit();
+              const fullRange = new vscode.Range(
+                editor.document.positionAt(0),
+                editor.document.positionAt(editor.document.getText().length),
+              );
+              edit.replace(uri, fullRange, result.text);
+              await vscode.workspace.applyEdit(edit);
+              vscode.window.showInformationMessage(`Fixed ${fixable.length} diagnostic(s). Use undo to revert.`);
+            }
+          } catch (err) {
+            vscode.window.showErrorMessage(`Fix failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
+        },
+      );
+    })
+  );
+
   // Create status bar item for token count
   const tokenStatusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,

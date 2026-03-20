@@ -83,6 +83,11 @@
         "command": "promptLSP.clearCache",
         "title": "Clear Analysis Cache",
         "category": "Prompt LSP"
+      },
+      {
+        "command": "promptLSP.fixAllDiagnostics",
+        "title": "Fix All Diagnostics",
+        "category": "Prompt LSP"
       }
     ]
   },
