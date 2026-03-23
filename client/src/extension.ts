@@ -29,10 +29,14 @@ let modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undef
 export function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel('Prompt LSP');
 
+  outputChannel.appendLine(`[Activation] Extension path: ${context.extensionPath}`);
+
   // Path to the server module (bundled for VSIX, parent dir for development)
   const bundledServer = context.asAbsolutePath(path.join('out', 'server.js'));
   const devServer = context.asAbsolutePath(path.join('..', 'out', 'server.js'));
   const serverModule = fs.existsSync(bundledServer) ? bundledServer : devServer;
+
+  outputChannel.appendLine(`[Activation] Server module: ${serverModule} (exists: ${fs.existsSync(serverModule)})`);
 
   // Debug options for the server
   const debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
@@ -255,14 +259,19 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Start the client
   client.start().then(() => {
+    outputChannel.appendLine('[Activation] Language server started successfully');
     // Send initial active document after client is ready
     notifyActiveDocument(vscode.window.activeTextEditor);
+  }).catch((err: Error) => {
+    outputChannel.appendLine(`[Activation] Language server failed to start: ${err.message}`);
+    outputChannel.show(true);
   });
 
   // Initial update
   updateTokenCount();
 
-  console.log('Prompt LSP extension activated');
+  outputChannel.appendLine('[Activation] Extension activated successfully');
+  outputChannel.show(true);
 }
 
 // Codes excluded from the "fix all" command

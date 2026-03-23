@@ -20,6 +20,7 @@
     "test": "vitest run",
     "lint": "eslint src && cd client && npx eslint src",
     "clean": "rm -rf out && cd client && rm -rf out",
+    "package": "npm run bundle && vsce package --no-dependencies",
     "preinstall": "cd client && npm install"
   },
   "keywords": [
@@ -177,6 +178,7 @@
   },
   "dependencies": {
     "tiktoken": "^1.0.22",
+    "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "yaml": "^2.8.2"
