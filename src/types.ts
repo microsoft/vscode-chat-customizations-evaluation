@@ -39,6 +39,7 @@ export interface LLMAmbiguityResponse {
     text: string;
     type: 'quantifier' | 'reference' | 'term' | 'scope' | 'other';
     severity: 'warning' | 'info';
+    problem: string;
     suggestion: string;
   }[];
 }
