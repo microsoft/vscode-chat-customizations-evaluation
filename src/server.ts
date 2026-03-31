@@ -553,94 +553,6 @@ connection.onCodeAction((params) => {
     }
   }
 
-  // Offer per-type and "fix all" code actions for fixable diagnostics
-  const excludedCodes = new Set([
-    'llm-disabled', 'llm-error',
-    'composition-unresolved', 'composition-missing',
-    'undefined-variable', 'empty-variable',
-  ]);
-  const excludedAnalyzers = new Set(['frontmatter-validation', 'variable-validation']);
-
-  // Map diagnostic codes to their fix command
-  const staticCodeCommandMap: Record<string, { command: string; title: string }> = {
-    'weak-instruction': { command: 'promptLSP.fixStaticInstructionStrength', title: 'Fix static: instruction strength' },
-    'instruction-dilution': { command: 'promptLSP.fixStaticInstructionStrength', title: 'Fix static: instruction strength' },
-    'ambiguous-quantifier': { command: 'promptLSP.fixStaticAmbiguity', title: 'Fix static: ambiguity' },
-    'vague-term': { command: 'promptLSP.fixStaticAmbiguity', title: 'Fix static: ambiguity' },
-    'unresolved-reference': { command: 'promptLSP.fixStaticAmbiguity', title: 'Fix static: ambiguity' },
-    'mixed-conventions': { command: 'promptLSP.fixStaticStructure', title: 'Fix static: structure' },
-    'unclosed-tag': { command: 'promptLSP.fixStaticStructure', title: 'Fix static: structure' },
-    'redundant-instruction': { command: 'promptLSP.fixStaticRedundancy', title: 'Fix static: redundancy' },
-    'subsumed-constraint': { command: 'promptLSP.fixStaticRedundancy', title: 'Fix static: redundancy' },
-    'missing-examples': { command: 'promptLSP.fixStaticExamples', title: 'Fix static: examples' },
-    'example-mismatch': { command: 'promptLSP.fixStaticExamples', title: 'Fix static: examples' },
-    'token-budget': { command: 'promptLSP.fixStaticTokenUsage', title: 'Fix static: token usage' },
-    'large-prompt': { command: 'promptLSP.fixStaticTokenUsage', title: 'Fix static: token usage' },
-    'emoji-tokens': { command: 'promptLSP.fixStaticTokenUsage', title: 'Fix static: token usage' },
-    'inefficient-tokenization': { command: 'promptLSP.fixStaticTokenUsage', title: 'Fix static: token usage' },
-    'heavy-section': { command: 'promptLSP.fixStaticTokenUsage', title: 'Fix static: token usage' },
-  };
-
-  const llmCodeCommandMap: Record<string, { command: string; title: string }> = {
-    'contradiction': { command: 'promptLSP.fixLLMContradictions', title: 'Fix LLM: contradictions' },
-    'contradiction-related': { command: 'promptLSP.fixLLMContradictions', title: 'Fix LLM: contradictions' },
-    'ambiguity-llm': { command: 'promptLSP.fixLLMAmbiguity', title: 'Fix LLM: ambiguity' },
-    'persona-inconsistency': { command: 'promptLSP.fixLLMPersonaConsistency', title: 'Fix LLM: persona consistency' },
-    'high-complexity': { command: 'promptLSP.fixLLMCognitiveLoad', title: 'Fix LLM: cognitive load' },
-    'unpredictable-length': { command: 'promptLSP.fixLLMOutputShape', title: 'Fix LLM: output shape' },
-    'low-format-compliance': { command: 'promptLSP.fixLLMOutputShape', title: 'Fix LLM: output shape' },
-    'high-refusal-rate': { command: 'promptLSP.fixLLMOutputShape', title: 'Fix LLM: output shape' },
-    'format-issue': { command: 'promptLSP.fixLLMOutputShape', title: 'Fix LLM: output shape' },
-    'output-warning': { command: 'promptLSP.fixLLMOutputShape', title: 'Fix LLM: output shape' },
-    'limited-coverage': { command: 'promptLSP.fixLLMCoverage', title: 'Fix LLM: coverage' },
-    'coverage-gap': { command: 'promptLSP.fixLLMCoverage', title: 'Fix LLM: coverage' },
-    'missing-error-handling': { command: 'promptLSP.fixLLMCoverage', title: 'Fix LLM: coverage' },
-    'composition-conflict': { command: 'promptLSP.fixLLMCompositionConflicts', title: 'Fix LLM: composition conflicts' },
-  };
-
-  // Collect unique fix commands offered for the current diagnostics
-  const offeredCommands = new Set<string>();
-  let hasFixable = false;
-
-  for (const d of params.context.diagnostics) {
-    if (!d.source?.startsWith('prompt-lsp')) continue;
-    const code = typeof d.code === 'string' ? d.code : String(d.code ?? '');
-    if (excludedCodes.has(code)) continue;
-    const analyzer = d.source.match(/\(([^)]+)\)/)?.[1];
-    if (analyzer && excludedAnalyzers.has(analyzer)) continue;
-
-    hasFixable = true;
-
-    // Check static codes
-    let entry = staticCodeCommandMap[code];
-    // Check LLM codes
-    if (!entry) entry = llmCodeCommandMap[code];
-    // Dynamic cognitive-* codes from LLM
-    if (!entry && code.startsWith('cognitive-')) {
-      entry = { command: 'promptLSP.fixLLMCognitiveLoad', title: 'Fix LLM: cognitive load' };
-    }
-
-    if (entry && !offeredCommands.has(entry.command)) {
-      offeredCommands.add(entry.command);
-      codeActions.push({
-        title: entry.title,
-        kind: CodeActionKind.QuickFix,
-        command: { title: entry.title, command: entry.command },
-      });
-    }
-  }
-
-  if (hasFixable) {
-    codeActions.push({
-      title: 'Fix all diagnostics in file (LLM)',
-      kind: CodeActionKind.QuickFix,
-      command: {
-        title: 'Fix all diagnostics in file (LLM)',
-        command: 'promptLSP.fixAllDiagnostics',
-      },
-    });
-  }
-
   return codeActions;
 });
 
@@ -688,32 +600,6 @@ connection.onNotification('promptLSP/analyze', (params: { uri: string }) => {
     connection.console.log(`[Analysis] No document found for ${params.uri}`);
   }
 });
-
-// Fix diagnostics request — uses LLM to fix all listed issues in the document
-connection.onRequest(
-  'promptLSP/fixDiagnostics',
-  async (params: { uri: string; diagnostics: { code: string; message: string; line: number }[] }): Promise<{ text: string | null; error?: string }> => {
-    const document = documents.get(params.uri);
-    if (!document) {
-      return { text: null, error: 'Document not found' };
-    }
-
-    if (!llmAnalyzer.isAvailable()) {
-      return { text: null, error: 'LLM not available. Install GitHub Copilot to use fix commands.' };
-    }
-
-    const promptDoc = getCachedPromptDocument(document);
-    connection.console.log(`[Fix] Fixing ${params.diagnostics.length} diagnostic(s) in ${params.uri}`);
-
-    const fixedText = await llmAnalyzer.fixDiagnostics(promptDoc, params.diagnostics);
-    if (!fixedText) {
-      return { text: null, error: 'Failed to generate fixes' };
-    }
-
-    connection.console.log(`[Fix] Generated fixed document (${fixedText.length} chars)`);
-    return { text: fixedText };
-  },
-);
 
 // Token count request for client status bar
 connection.onRequest('promptLSP/tokenCount', (params: { uri: string }): number => {

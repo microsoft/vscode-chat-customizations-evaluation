@@ -150,37 +150,6 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('promptLSP.fixAllDiagnostics', () => fixDiagnosticsByCodes())
-  );
-
-  // Static analysis fix commands
-  const staticFixCommands: [string, string[]][] = [
-    ['promptLSP.fixStaticInstructionStrength', ['weak-instruction', 'instruction-dilution']],
-    ['promptLSP.fixStaticAmbiguity', ['ambiguous-quantifier', 'vague-term', 'unresolved-reference']],
-    ['promptLSP.fixStaticStructure', ['mixed-conventions', 'unclosed-tag']],
-    ['promptLSP.fixStaticRedundancy', ['redundant-instruction', 'subsumed-constraint']],
-    ['promptLSP.fixStaticExamples', ['missing-examples', 'example-mismatch']],
-    ['promptLSP.fixStaticTokenUsage', ['token-budget', 'large-prompt', 'emoji-tokens', 'inefficient-tokenization', 'heavy-section']],
-  ];
-
-  // LLM analysis fix commands
-  const llmFixCommands: [string, string[]][] = [
-    ['promptLSP.fixLLMContradictions', ['contradiction', 'contradiction-related']],
-    ['promptLSP.fixLLMAmbiguity', ['ambiguity-llm']],
-    ['promptLSP.fixLLMPersonaConsistency', ['persona-inconsistency']],
-    ['promptLSP.fixLLMCognitiveLoad', ['high-complexity', 'cognitive-nested-conditions', 'cognitive-priority-conflict', 'cognitive-deep-decision-tree', 'cognitive-constraint-overload']],
-    ['promptLSP.fixLLMOutputShape', ['unpredictable-length', 'low-format-compliance', 'high-refusal-rate', 'format-issue', 'output-warning']],
-    ['promptLSP.fixLLMCoverage', ['limited-coverage', 'coverage-gap', 'missing-error-handling']],
-    ['promptLSP.fixLLMCompositionConflicts', ['composition-conflict']],
-  ];
-
-  for (const [commandId, codes] of [...staticFixCommands, ...llmFixCommands]) {
-    context.subscriptions.push(
-      vscode.commands.registerCommand(commandId, () => fixDiagnosticsByCodes(new Set(codes)))
-    );
-  }
-
   // Create status bar item for token count
   const tokenStatusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -270,101 +239,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Initial update
   updateTokenCount();
 
-  outputChannel.appendLine('[Activation] Extension activated successfully');
-  outputChannel.show(true);
-}
-
-// Codes excluded from the "fix all" command
-const EXCLUDED_CODES = new Set([
-  'llm-disabled', 'llm-error',
-  'composition-unresolved', 'composition-missing',
-  'undefined-variable', 'empty-variable',
-]);
-
-// Analyzer sources excluded from the "fix all" command
-const EXCLUDED_ANALYZERS = new Set(['frontmatter-validation', 'variable-validation']);
-
-/**
- * Fix diagnostics in the active file.  When `codeFilter` is provided only
- * diagnostics whose code is in the set are included; otherwise all fixable
- * diagnostics (excluding variable / frontmatter) are sent.
- */
-async function fixDiagnosticsByCodes(codeFilter?: Set<string>): Promise<void> {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) return;
-
-  const uri = editor.document.uri;
-  const allDiagnostics = vscode.languages.getDiagnostics(uri);
-
-  const fixable = allDiagnostics.filter((d) => {
-    if (!d.source?.startsWith('prompt-lsp')) return false;
-    const code = typeof d.code === 'object' ? String(d.code.value) : String(d.code ?? '');
-    if (EXCLUDED_CODES.has(code)) return false;
-    if (codeFilter) {
-      // When filtering by codes, also accept dynamic cognitive-* codes
-      return codeFilter.has(code) || (code.startsWith('cognitive-') && codeFilter.has(code));
-    }
-    // "Fix all" path — exclude frontmatter / variable analyzers
-    const analyzer = d.source.match(/\(([^)]+)\)/)?.[1];
-    if (analyzer && EXCLUDED_ANALYZERS.has(analyzer)) return false;
-    return true;
-  });
-
-  if (fixable.length === 0) {
-    vscode.window.showInformationMessage('No fixable diagnostics found in this file.');
-    return;
-  }
-
-  outputChannel.appendLine(`[Fix] Targeting ${fixable.length} diagnostic(s)${codeFilter ? ` (filter: ${[...codeFilter].join(', ')})` : ' (all)'}:`);
-  for (const d of fixable) {
-    const code = typeof d.code === 'object' ? String(d.code.value) : String(d.code ?? '');
-    outputChannel.appendLine(`[Fix]   Line ${d.range.start.line + 1}: [${code}] ${d.message}`);
-    console.log(`[Prompt LSP Fix] Line ${d.range.start.line + 1}: [${code}] ${d.message}`);
-  }
-  console.log(`[Prompt LSP Fix] Targeting ${fixable.length} diagnostic(s)`, fixable.map((d) => ({
-    code: typeof d.code === 'object' ? d.code.value : d.code,
-    line: d.range.start.line + 1,
-    message: d.message,
-    source: d.source,
-  })));
-
-  const diagnosticInfo = fixable.map((d) => ({
-    code: typeof d.code === 'object' ? String(d.code.value) : String(d.code ?? ''),
-    message: d.message,
-    line: d.range.start.line,
-  }));
-
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Fixing diagnostics...', cancellable: false },
-    async () => {
-      try {
-        const result = await client.sendRequest<{ text: string | null; error?: string }>(
-          'promptLSP/fixDiagnostics',
-          { uri: uri.toString(), diagnostics: diagnosticInfo },
-        );
-
-        if (result.error) {
-          vscode.window.showErrorMessage(`Fix failed: ${result.error}`);
-          return;
-        }
-
-        if (result.text) {
-          const edit = new vscode.WorkspaceEdit();
-          const fullRange = new vscode.Range(
-            editor.document.positionAt(0),
-            editor.document.positionAt(editor.document.getText().length),
-          );
-          edit.replace(uri, fullRange, result.text);
-          await vscode.workspace.applyEdit(edit);
-          // Trigger full re-analysis (including LLM) on the updated document
-          client.sendNotification('promptLSP/analyze', { uri: uri.toString() });
-          vscode.window.showInformationMessage(`Fixed ${fixable.length} diagnostic(s). Use undo to revert.`);
-        }
-      } catch (err) {
-        vscode.window.showErrorMessage(`Fix failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      }
-    },
-  );
+  console.log('Prompt LSP extension activated');
 }
 
 /**
