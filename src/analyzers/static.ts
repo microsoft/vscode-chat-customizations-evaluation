@@ -83,17 +83,6 @@ export class StaticAnalyzer {
     return results;
   }
 
-  /**
-   * Fast analysis for keystroke path — skips token counting and file system access.
-   */
-  analyzeQuick(doc: PromptDocument): AnalysisResult[] {
-    const results: AnalysisResult[] = [];
-
-    results.push(...this.analyzeAmbiguity(doc));
-
-    return results;
-  }
-
   // Ambiguity Detection (Tier 1)
   private analyzeAmbiguity(doc: PromptDocument): AnalysisResult[] {
     const results: AnalysisResult[] = [];

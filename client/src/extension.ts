@@ -150,6 +150,16 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Create status bar item for analyze prompt
+  const analyzeStatusBar = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    101
+  );
+  analyzeStatusBar.command = 'promptLSP.analyzePrompt';
+  analyzeStatusBar.text = '$(beaker) Analyze Prompt';
+  analyzeStatusBar.tooltip = 'Run full prompt analysis (including LLM)';
+  context.subscriptions.push(analyzeStatusBar);
+
   // Create status bar item for token count
   const tokenStatusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -166,7 +176,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   const updateTokenCount = () => {
     const editor = vscode.window.activeTextEditor;
-    if (editor && isPromptDocument(editor.document)) {
+    const isPrompt = editor ? isPromptDocument(editor.document) : false;
+    vscode.commands.executeCommand('setContext', 'promptLSP.isPromptFile', isPrompt);
+    if (editor && isPrompt) {
+      analyzeStatusBar.show();
       const text = editor.document.getText();
       const estimatedTokens = Math.ceil(text.length / 4);
       tokenStatusBar.text = `$(symbol-number) ~${estimatedTokens} tokens`;
@@ -190,6 +203,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }, 300);
     } else {
+      analyzeStatusBar.hide();
       tokenStatusBar.hide();
     }
   };

@@ -72,7 +72,8 @@
       {
         "command": "promptLSP.analyzePrompt",
         "title": "Analyze Prompt",
-        "category": "Prompt LSP"
+        "category": "Prompt LSP",
+        "icon": "$(beaker)"
       },
       {
         "command": "promptLSP.showTokenCount",
@@ -84,7 +85,15 @@
         "title": "Clear Analysis Cache",
         "category": "Prompt LSP"
       }
-    ]
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "promptLSP.analyzePrompt",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

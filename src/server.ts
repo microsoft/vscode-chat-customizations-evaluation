@@ -45,9 +45,7 @@ const cache = new AnalysisCache();
 
 // Debounce timers for analysis
 const llmDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
-const recentlyOpened: Set<string> = new Set();
 const documentVersions: Map<string, number> = new Map();
-const LLM_DEBOUNCE_DELAY = 2000; // ms - longer delay for LLM to avoid excessive API calls
 
 // Parse cache: avoids re-parsing on every CodeLens/Hover/Definition request
 const parsedDocumentCache: Map<string, { version: number; doc: PromptDocument }> = new Map();
@@ -184,49 +182,9 @@ async function updateConfiguration(): Promise<void> {
   }
 }
 
-// Handle document changes - static analysis immediately, full static after pause, LLM only on save
-documents.onDidChangeContent((change) => {
-  const uri = change.document.uri;
+// Analysis is triggered manually via the status bar button / command.
+// No automatic analysis on change, save, or open.
 
-  // Cancel existing debounce timer
-  const existingTimer = llmDebounceTimers.get(uri);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-
-  // Skip the synthetic content event fired on open (version 1) — onDidOpen already triggers analysis.
-  // But if version > 1, the user typed before the open analysis finished, so handle normally.
-  if (recentlyOpened.has(uri)) {
-    recentlyOpened.delete(uri);
-    if (change.document.version <= 1) {
-      return;
-    }
-  }
-
-  // Run quick static analysis immediately (cheap checks only, no token counting or FS access)
-  runStaticAnalysis(change.document);
-
-  // Debounce FULL STATIC analysis (with token counting and composition links) — but NOT LLM
-  // LLM analysis is too expensive to run on every typing pause; it only runs on save/open/manual
-  const timer = setTimeout(() => {
-    runFullAnalysis(change.document, { skipLLM: true });
-    llmDebounceTimers.delete(uri);
-  }, LLM_DEBOUNCE_DELAY);
-  llmDebounceTimers.set(uri, timer);
-});
-
-// Full analysis including LLM on save
-documents.onDidSave((event) => {
-  runFullAnalysis(event.document, { skipLLM: false });
-});
-
-// Full analysis including LLM when document is opened
-documents.onDidOpen((event) => {
-  recentlyOpened.add(event.document.uri);
-  runFullAnalysis(event.document, { skipLLM: false });
-});
-
-// Run quick static analysis only (fast, on keystroke — no token counting or FS access)
 function getCachedPromptDocument(textDocument: TextDocument): PromptDocument {
   const uri = textDocument.uri;
   const version = textDocument.version;
@@ -237,16 +195,6 @@ function getCachedPromptDocument(textDocument: TextDocument): PromptDocument {
   const doc = parsePromptDocument({ uri, text: textDocument.getText(), workspaceRoot });
   parsedDocumentCache.set(uri, { version, doc });
   return doc;
-}
-
-async function runStaticAnalysis(textDocument: TextDocument): Promise<void> {
-  const promptDoc = getCachedPromptDocument(textDocument);
-  const staticResults = staticAnalyzer.analyzeQuick(promptDoc);
-
-  lastStaticAnalysisResults.set(textDocument.uri, staticResults);
-
-  const diagnostics = resultsToDiagnostics(staticResults);
-  connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
 }
 
 // Run full analysis — LLM analysis only when skipLLM is false (save/open/manual)
@@ -533,7 +481,6 @@ documents.onDidClose((event) => {
   const timer = llmDebounceTimers.get(uri);
   if (timer) clearTimeout(timer);
   llmDebounceTimers.delete(uri);
-  recentlyOpened.delete(uri);
 });
 
 // Make the text document manager listen on the connection
