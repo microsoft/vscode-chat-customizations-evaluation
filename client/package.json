@@ -1,9 +1,9 @@
 {
-  "name": "prompt-lsp-client",
-  "displayName": "Prompt LSP",
+  "name": "chat-customizations-evaluations-client",
+  "displayName": "Chat Customizations Evaluations",
   "description": "Language Server Protocol implementation for analyzing, validating, and improving AI prompts",
   "version": "0.1.0",
-  "publisher": "prompt-lsp",
+  "publisher": "chat-customizations-evaluations",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -48,14 +48,14 @@
     ],
     "configuration": {
       "type": "object",
-      "title": "Prompt LSP",
+      "title": "Chat Customizations Evaluations",
       "properties": {
-        "promptLSP.enable": {
+        "chatCustomizationsEvaluations.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable/disable the Prompt LSP extension"
+          "description": "Enable/disable the Chat Customizations Evaluations extension"
         },
-        "promptLSP.trace.server": {
+        "chatCustomizationsEvaluations.trace.server": {
           "type": "string",
           "enum": [
             "off",
@@ -69,16 +69,16 @@
     },
     "commands": [
       {
-        "command": "promptLSP.analyzePrompt",
+        "command": "chatCustomizationsEvaluations.analyzePrompt",
         "title": "Analyze Prompt",
-        "category": "Prompt LSP",
+        "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "promptLSP.analyzePrompt",
+          "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "navigation"
         }
       ]

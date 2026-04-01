@@ -1,6 +1,6 @@
-# Contributing to Prompt LSP
+# Contributing to Chat Customizations Evaluations
 
-Thank you for your interest in contributing to Prompt LSP! This guide will help you get started.
+Thank you for your interest in contributing to Chat Customizations Evaluations! This guide will help you get started.
 
 ## Development Setup
 
@@ -13,8 +13,8 @@ Thank you for your interest in contributing to Prompt LSP! This guide will help 
 
 ```bash
 # Clone the repository
-git clone https://github.com/pierceboggan/prompt-lsp.git
-cd prompt-lsp
+git clone https://github.com/microsoft/vscode-prompt-lsp.git
+cd vscode-prompt-lsp
 
 # Install dependencies (also installs client dependencies)
 npm install
@@ -29,21 +29,16 @@ npm test
 ### Project Structure
 
 ```
-prompt-lsp/
+chat-customizations-evaluations/
 ├── src/                    # Language server source
 │   ├── server.ts           # LSP server entry point
 │   ├── types.ts            # Shared type definitions
-│   ├── cache.ts            # Content-hash analysis cache
 │   ├── analyzers/
-│   │   ├── static.ts       # Static analysis (fast, no LLM)
 │   │   └── llm.ts          # LLM-powered semantic analysis
 │   └── __tests__/          # Unit tests
 ├── client/                 # VS Code extension client
 │   ├── src/extension.ts    # Extension entry point
-│   ├── syntaxes/           # TextMate grammar for syntax highlighting
 │   └── package.json        # Extension manifest & configuration
-├── examples/               # Example prompt files for testing
-├── docs/                   # Design specifications
 └── vitest.config.ts        # Test configuration
 ```
 

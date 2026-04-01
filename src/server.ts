@@ -39,11 +39,11 @@ connection.onInitialize((_params: InitializeParams) => {
 });
 
 connection.onInitialized(() => {
-  connection.console.log('Prompt LSP initialized');
+  connection.console.log('Chat Customizations Evaluations initialized');
   // Set up LLM proxy: server sends requests to client, client calls vscode.lm
   llmAnalyzer.setProxyFn(async (request: LLMProxyRequest): Promise<LLMProxyResponse> => {
     try {
-      const response = await connection.sendRequest<LLMProxyResponse>('promptLSP/llmRequest', request);
+      const response = await connection.sendRequest<LLMProxyResponse>('chatCustomizationsEvaluations/llmRequest', request);
       return response;
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Proxy request failed';
@@ -84,14 +84,14 @@ export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
       severity,
       range: result.range,
       message: result.message,
-      source: `prompt-lsp (${result.analyzer})`,
+      source: `chat-customizations-evaluations (${result.analyzer})`,
       code: result.code,
       data: result.suggestion,
     };
   });
 }
 
-connection.onNotification('promptLSP/analyze', (params: { uri: string }) => {
+connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { uri: string }) => {
   const document = documents.get(params.uri);
   if (document) {
     runFullAnalysis(document);

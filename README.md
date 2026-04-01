@@ -1,4 +1,4 @@
-# Prompt LSP
+# Chat Customizations Evaluations
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -18,7 +18,7 @@ A Language Server Protocol implementation for analyzing and improving AI prompt 
 ### Editor Integration
 
 - **Editor Title Bar** — Analyze Prompt button appears when editing prompt files
-- **Command Palette** — `Prompt LSP: Analyze Prompt` command
+- **Command Palette** — `Chat Customizations Evaluations: Analyze Prompt` command
 - **Problems Panel** — All diagnostics appear in the standard VS Code Problems panel with precise line and column locations
 
 ## Supported File Types
@@ -43,7 +43,7 @@ Then press `F5` in VS Code to launch the Extension Development Host.
 ## Usage
 
 1. Open any supported prompt file in VS Code
-2. Run **Prompt LSP: Analyze Prompt** from the command palette or click the beaker icon in the editor title bar
+2. Run **Chat Customizations Evaluations: Analyze Prompt** from the command palette or click the beaker icon in the editor title bar
 3. View results in the **Problems panel** (`Ctrl+Shift+M` / `Cmd+Shift+M`)
 
 LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to GitHub Copilot in VS Code.
@@ -52,14 +52,14 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 
 | Command | Description |
 |---------|-------------|
-| `Prompt LSP: Analyze Prompt` | Run full LLM-powered analysis on the active file |
+| `Chat Customizations Evaluations: Analyze Prompt` | Run full LLM-powered analysis on the active file |
 
 ### Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `promptLSP.enable` | `true` | Enable/disable the extension |
-| `promptLSP.trace.server` | `off` | Trace communication between VS Code and the language server |
+| `chatCustomizationsEvaluations.enable` | `true` | Enable/disable the extension |
+| `chatCustomizationsEvaluations.trace.server` | `off` | Trace communication between VS Code and the language server |
 
 ## Architecture
 

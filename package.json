@@ -1,8 +1,8 @@
 {
-  "name": "vscode-prompt-lsp",
+  "name": "chat-customizations-evaluations",
   "version": "1.0.0",
-  "publisher": "vscode-prompt-lsp",
-  "displayName": "Prompt LSP",
+  "publisher": "chat-customizations-evaluations",
+  "displayName": "Chat Customizations Evaluations",
   "description": "Language Server Protocol implementation for analyzing, validating, and improving AI prompts",
   "main": "./client/out/extension.js",
   "categories": [
@@ -35,7 +35,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pierceboggan/prompt-lsp"
+    "url": "https://github.com/microsoft/vscode-prompt-lsp"
   },
   "engines": {
     "vscode": "^1.90.0"
@@ -68,14 +68,14 @@
     ],
     "configuration": {
       "type": "object",
-      "title": "Prompt LSP",
+      "title": "Chat Customizations Evaluations",
       "properties": {
-        "promptLSP.enable": {
+        "chatCustomizationsEvaluations.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable/disable the Prompt LSP extension"
+          "description": "Enable/disable the Chat Customizations Evaluations extension"
         },
-        "promptLSP.trace.server": {
+        "chatCustomizationsEvaluations.trace.server": {
           "type": "string",
           "enum": [
             "off",
@@ -89,16 +89,16 @@
     },
     "commands": [
       {
-        "command": "promptLSP.analyzePrompt",
+        "command": "chatCustomizationsEvaluations.analyzePrompt",
         "title": "Analyze Prompt",
-        "category": "Prompt LSP",
+        "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "promptLSP.analyzePrompt",
+          "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "navigation",
           "when": "editorLangId == prompt"
         }

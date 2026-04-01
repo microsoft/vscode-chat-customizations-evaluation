@@ -19,7 +19,7 @@ interface LLMProxyResponse {
   error?: string;
 }
 
-const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('promptLSP/llmRequest');
+const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 
 let client: LanguageClient;
 let outputChannel: vscode.OutputChannel;
@@ -27,7 +27,7 @@ let cachedModel: vscode.LanguageModelChat | undefined;
 let modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-  outputChannel = vscode.window.createOutputChannel('Prompt LSP');
+  outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
 
   outputChannel.appendLine(`[Activation] Extension path: ${context.extensionPath}`);
 
@@ -81,8 +81,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Create the language client
   client = new LanguageClient(
-    'promptLSP',
-    'Prompt LSP',
+    'chatCustomizationsEvaluations',
+    'Chat Customizations Evaluations',
     serverOptions,
     clientOptions
   );
@@ -101,11 +101,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('promptLSP.analyzePrompt', () => {
+    vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) {
         // Send notification to server to trigger full analysis
-        client.sendNotification('promptLSP/analyze', { uri: editor.document.uri.toString() });
+        client.sendNotification('chatCustomizationsEvaluations/analyze', { uri: editor.document.uri.toString() });
         vscode.window.showInformationMessage('Running prompt analysis...');
       }
     })
@@ -130,7 +130,7 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.show(true);
   });
 
-  console.log('Prompt LSP extension activated');
+  console.log('Chat Customizations Evaluations extension activated');
 }
 
 /**
