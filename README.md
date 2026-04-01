@@ -83,7 +83,6 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       LSP Interface                         │
 │              Diagnostics → Problems Panel                   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -92,7 +91,7 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 
 ```
 src/
-├── server.ts              # LSP server entry point, diagnostics
+├── server.ts              # Server entry point, diagnostics
 ├── types.ts               # Shared TypeScript types and interfaces
 ├── analyzers/
 │   └── llm.ts             # LLM-powered analysis (all diagnostic categories)

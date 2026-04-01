@@ -31,7 +31,7 @@ npm test
 ```
 chat-customizations-evaluations/
 ├── src/                    # Language server source
-│   ├── server.ts           # LSP server entry point
+│   ├── server.ts           # Server entry point
 │   ├── types.ts            # Shared type definitions
 │   ├── analyzers/
 │   │   └── llm.ts          # LLM-powered semantic analysis
