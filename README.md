@@ -32,8 +32,8 @@ A Language Server Protocol implementation for analyzing and improving AI prompt 
 ## Installation
 
 ```bash
-git clone https://github.com/microsoft/vscode-prompt-lsp.git
-cd vscode-prompt-lsp
+git clone https://github.com/microsoft/vscode-chat-customizations-evaluation.git
+cd vscode-chat-customizations-evaluation
 npm install
 npm run build
 ```

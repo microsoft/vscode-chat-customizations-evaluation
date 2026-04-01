@@ -5,7 +5,7 @@ resources:
   repositories:
     - repository: templates
       type: github
-      name: microsoft/vscode-prompt-lsp
+      name: microsoft/vscode-chat-customizations-evaluation
       ref: main
       endpoint: Monaco
 

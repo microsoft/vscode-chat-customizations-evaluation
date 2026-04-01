@@ -35,7 +35,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/vscode-prompt-lsp"
+    "url": "https://github.com/microsoft/vscode-chat-customizations-evaluation"
   },
   "engines": {
     "vscode": "^1.90.0"
