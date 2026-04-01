@@ -18,16 +18,16 @@ parameters:
 extends:
   template: azure-pipelines/extension/stable.yml@templates
   parameters:
-    workingDirectory: chat-customizations-evaluations
+    workingDirectory: vscode-chat-customizations-evaluation
     l10nSourcePaths: ./src
     buildSteps:
       - script: npm i
         displayName: Install Dependencies
-        workingDirectory: chat-customizations-evaluations
+        workingDirectory: vscode-chat-customizations-evaluation
 
       - script: npm run bundle
         displayName: Bundle for Production
-        workingDirectory: chat-customizations-evaluations
+        workingDirectory: vscode-chat-customizations-evaluation
 
     tsa:
       config:
