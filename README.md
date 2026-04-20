@@ -32,8 +32,8 @@ A Language Server Protocol implementation for analyzing and improving AI prompt 
 ## Installation
 
 ```bash
-git clone https://github.com/microsoft/vscode-prompt-lsp.git
-cd vscode-prompt-lsp
+git clone https://github.com/microsoft/vscode-chat-customizations-evaluation.git
+cd vscode-chat-customizations-evaluation
 npm install
 npm run build
 ```
@@ -83,7 +83,6 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       LSP Interface                         │
 │              Diagnostics → Problems Panel                   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -92,7 +91,7 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 
 ```
 src/
-├── server.ts              # LSP server entry point, diagnostics
+├── server.ts              # Server entry point, diagnostics
 ├── types.ts               # Shared TypeScript types and interfaces
 ├── analyzers/
 │   └── llm.ts             # LLM-powered analysis (all diagnostic categories)
