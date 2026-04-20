@@ -5,7 +5,7 @@ resources:
   repositories:
     - repository: templates
       type: github
-      name: microsoft/vscode-prompt-lsp
+      name: microsoft/vscode-engineering
       ref: main
       endpoint: Monaco
 
@@ -18,16 +18,13 @@ parameters:
 extends:
   template: azure-pipelines/extension/stable.yml@templates
   parameters:
-    workingDirectory: chat-customizations-evaluations
     l10nSourcePaths: ./src
     buildSteps:
       - script: npm i
         displayName: Install Dependencies
-        workingDirectory: chat-customizations-evaluations
 
       - script: npm run bundle
         displayName: Bundle for Production
-        workingDirectory: chat-customizations-evaluations
 
     tsa:
       config:
