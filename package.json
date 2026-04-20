@@ -1,9 +1,9 @@
 {
-  "name": "chat-customizations-evaluations",
+  "name": "vscode-chat-customizations-evaluations",
   "version": "1.0.0",
-  "publisher": "chat-customizations-evaluations",
+  "publisher": "ms-vscode",
   "displayName": "Chat Customizations Evaluations",
-  "description": "Language Server Protocol implementation for analyzing, validating, and improving AI prompts",
+  "description": "Extension for analyzing, validating, and improving AI prompts",
   "main": "./client/out/extension.js",
   "categories": [
     "Linters",
@@ -24,7 +24,6 @@
     "preinstall": "cd client && npm install"
   },
   "keywords": [
-    "lsp",
     "language-server",
     "ai",
     "prompt",
@@ -35,7 +34,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/vscode-prompt-lsp"
+    "url": "https://github.com/microsoft/vscode-chat-customizations-evaluation"
   },
   "engines": {
     "vscode": "^1.90.0"

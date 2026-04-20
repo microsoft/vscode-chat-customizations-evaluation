@@ -13,8 +13,8 @@ Thank you for your interest in contributing to Chat Customizations Evaluations! 
 
 ```bash
 # Clone the repository
-git clone https://github.com/microsoft/vscode-prompt-lsp.git
-cd vscode-prompt-lsp
+git clone https://github.com/microsoft/vscode-chat-customizations-evaluation.git
+cd vscode-chat-customizations-evaluation
 
 # Install dependencies (also installs client dependencies)
 npm install
@@ -31,7 +31,7 @@ npm test
 ```
 chat-customizations-evaluations/
 ├── src/                    # Language server source
-│   ├── server.ts           # LSP server entry point
+│   ├── server.ts           # Server entry point
 │   ├── types.ts            # Shared type definitions
 │   ├── analyzers/
 │   │   └── llm.ts          # LLM-powered semantic analysis
