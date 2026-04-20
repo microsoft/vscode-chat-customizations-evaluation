@@ -9,7 +9,6 @@ export interface AnalysisResult {
   suggestion?: string;
 }
 
-// LSP proxy types for vscode.lm integration
 export interface LLMProxyRequest {
   prompt: string;
   systemPrompt: string;
