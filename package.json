@@ -44,28 +44,6 @@
     "onStartupFinished"
   ],
   "contributes": {
-    "languages": [
-      {
-        "id": "prompt",
-        "aliases": [
-          "AI Prompt",
-          "prompt"
-        ],
-        "extensions": [
-          ".prompt.md",
-          ".agent.md",
-          ".prompt"
-        ],
-        "configuration": "./client/language-configuration.json"
-      }
-    ],
-    "grammars": [
-      {
-        "language": "prompt",
-        "scopeName": "text.prompt",
-        "path": "./client/syntaxes/prompt.tmLanguage.json"
-      }
-    ],
     "configuration": {
       "type": "object",
       "title": "Chat Customizations Evaluations",
@@ -96,7 +74,7 @@
       }
     ],
     "menus": {
-      "editor/title": [
+      "AICustomizationManagementEditorItem": [
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "navigation",
