@@ -5,6 +5,7 @@
   "displayName": "Chat Customizations Evaluations",
   "description": "Extension for analyzing, validating, and improving AI prompts",
   "main": "./client/out/extension.js",
+  "icon": "icon.png",
   "categories": [
     "Linters",
     "Programming Languages"
@@ -40,34 +41,13 @@
     "vscode": "^1.90.0"
   },
   "enabledApiProposals": [
+    "chatSessionCustomizationProvider",
     "contribEditorContentMenu"
   ],
   "activationEvents": [
     "onStartupFinished"
   ],
   "contributes": {
-    "languages": [
-      {
-        "id": "prompt",
-        "aliases": [
-          "AI Prompt",
-          "prompt"
-        ],
-        "extensions": [
-          ".prompt.md",
-          ".agent.md",
-          ".prompt"
-        ],
-        "configuration": "./client/language-configuration.json"
-      }
-    ],
-    "grammars": [
-      {
-        "language": "prompt",
-        "scopeName": "text.prompt",
-        "path": "./client/syntaxes/prompt.tmLanguage.json"
-      }
-    ],
     "configuration": {
       "type": "object",
       "title": "Chat Customizations Evaluations",
@@ -95,6 +75,12 @@
         "title": "Analyze Prompt",
         "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+        "title": "Analyze Prompt",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(beaker)"
       }
     ],
     "menus": {
@@ -102,7 +88,14 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
-          "when": "editorLangId == prompt"
+          "when": "editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions"
+        }
+      ],
+      "chat/customizations/item": [
+        {
+          "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+          "group": "inline",
+          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
         }
       ]
     }
