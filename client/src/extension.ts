@@ -26,6 +26,85 @@ let outputChannel: vscode.OutputChannel;
 let cachedModel: vscode.LanguageModelChat | undefined;
 let modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
 
+function isUriLike(value: unknown): value is vscode.Uri {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as {
+    scheme?: unknown;
+    path?: unknown;
+    toString?: unknown;
+  };
+
+  return (
+    typeof candidate.scheme === 'string'
+    && typeof candidate.path === 'string'
+    && typeof candidate.toString === 'function'
+  );
+}
+
+function toUri(value: unknown): vscode.Uri | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (isUriLike(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return vscode.Uri.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (typeof value === 'object') {
+    const candidate = value as {
+      scheme?: unknown;
+      path?: unknown;
+      authority?: unknown;
+      query?: unknown;
+      fragment?: unknown;
+    };
+    if (typeof candidate.scheme === 'string' && typeof candidate.path === 'string') {
+      return vscode.Uri.from({
+        scheme: candidate.scheme,
+        path: candidate.path,
+        authority: typeof candidate.authority === 'string' ? candidate.authority : '',
+        query: typeof candidate.query === 'string' ? candidate.query : '',
+        fragment: typeof candidate.fragment === 'string' ? candidate.fragment : '',
+      });
+    }
+  }
+
+  return undefined;
+}
+
+function getCustomizationUri(obj: unknown): vscode.Uri | undefined {
+  if (!obj || typeof obj !== 'object') {
+    return undefined;
+  }
+
+  const arg = obj as {
+    uri?: unknown;
+    resourceUri?: unknown;
+    item?: {
+      uri?: unknown;
+      resourceUri?: unknown;
+    };
+  };
+
+  return (
+    toUri(arg.uri)
+    ?? toUri(arg.resourceUri)
+    ?? toUri(arg.item?.uri)
+    ?? toUri(arg.item?.resourceUri)
+  );
+}
+
 export function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
 
@@ -108,6 +187,20 @@ export function activate(context: vscode.ExtensionContext) {
         client.sendNotification('chatCustomizationsEvaluations/analyze', { uri: editor.document.uri.toString() });
         vscode.window.showInformationMessage('Running prompt analysis...');
       }
+    }),
+    vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
+      outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
+      const uri = getCustomizationUri(obj);
+      if (!uri) {
+        outputChannel.appendLine('[Analyze Prompt From Customization] Missing URI in command arguments');
+        void vscode.window.showWarningMessage('Unable to analyze prompt: no URI was provided by the customization item.');
+        return;
+      }
+
+      client.sendNotification('chatCustomizationsEvaluations/analyze', { uri: uri.toString() });
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+      void vscode.window.showInformationMessage('Running prompt analysis...');
     })
   );
 

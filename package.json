@@ -40,6 +40,9 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "enabledApiProposals": [
+    "chatSessionCustomizationProvider"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -71,6 +74,12 @@
         "title": "Analyze Prompt",
         "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+        "title": "Analyze Prompt",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(beaker)"
       }
     ],
     "menus": {
@@ -79,6 +88,13 @@
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "navigation",
           "when": "editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions"
+        }
+      ],
+      "chat/customizations/item": [
+        {
+          "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+          "group": "inline",
+          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
         }
       ]
     }
