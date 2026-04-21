@@ -39,6 +39,9 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "enabledApiProposals": [
+    "contribEditorContentMenu"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -95,10 +98,10 @@
       }
     ],
     "menus": {
-      "editor/title": [
+      "editor/content": [
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
-          "group": "navigation",
+          "group": "inline",
           "when": "editorLangId == prompt"
         }
       ]
