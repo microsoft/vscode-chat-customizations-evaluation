@@ -99,7 +99,7 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "navigation",
-          "when": "editorLangId == prompt"
+          "when": "editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions"
         }
       ]
     }
