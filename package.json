@@ -41,7 +41,8 @@
     "vscode": "^1.90.0"
   },
   "enabledApiProposals": [
-    "chatSessionCustomizationProvider"
+    "chatSessionCustomizationProvider",
+    "contribEditorContentMenu"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -72,8 +73,12 @@
       {
         "command": "chatCustomizationsEvaluations.analyzePrompt",
         "title": "Analyze Prompt",
-        "category": "Chat Customizations Evaluations",
-        "icon": "$(beaker)"
+        "category": "Chat Customizations Evaluations"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.fixDiagnostics",
+        "title": "Fix Diagnostics",
+        "category": "Chat Customizations Evaluations"
       },
       {
         "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
@@ -83,11 +88,16 @@
       }
     ],
     "menus": {
-      "AICustomizationManagementEditorItem": [
+      "editor/content": [
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
-          "group": "navigation",
-          "when": "editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions"
+          "group": "inline",
+          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.fixDiagnostics",
+          "group": "inline",
+          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
         }
       ],
       "chat/customizations/item": [
@@ -97,7 +107,12 @@
           "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
         }
       ]
-    }
+    },
+    "chatSkills": [
+      {
+        "path": "./skills/fix-customization-evaluation-diagnostics/SKILL.md"
+      }
+    ]
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",

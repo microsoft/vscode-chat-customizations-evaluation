@@ -98,6 +98,11 @@ connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { ur
   }
 });
 
+// Clear diagnostics when the document is modified
+documents.onDidChangeContent((change) => {
+  connection.sendDiagnostics({ uri: change.document.uri, diagnostics: [] });
+});
+
 documents.listen(connection);
 
 connection.listen();
