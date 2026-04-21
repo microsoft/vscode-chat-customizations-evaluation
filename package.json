@@ -5,6 +5,7 @@
   "displayName": "Chat Customizations Evaluations",
   "description": "Extension for analyzing, validating, and improving AI prompts",
   "main": "./client/out/extension.js",
+  "icon": "icon.png",
   "categories": [
     "Linters",
     "Programming Languages"
