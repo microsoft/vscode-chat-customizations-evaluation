@@ -20,6 +20,7 @@ interface LLMProxyResponse {
 }
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
+const urisWithDiagnostics = new Set<string>();
 
 let client: LanguageClient;
 let outputChannel: vscode.OutputChannel;
@@ -188,6 +189,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Running prompt analysis...');
       }
     }),
+    vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: '/fix-customization-evaluation-diagnostics',
+        isPartialQuery: false,
+      });
+    }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
       outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
       const uri = getCustomizationUri(obj);
@@ -201,6 +212,26 @@ export function activate(context: vscode.ExtensionContext) {
       const document = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
       void vscode.window.showInformationMessage('Running prompt analysis...');
+    })
+  );
+  // Track diagnostics to toggle button between "Analyze Prompt" and "Fix Diagnostics"
+  context.subscriptions.push(
+    vscode.languages.onDidChangeDiagnostics((e) => {
+      for (const uri of e.uris) {
+        const diagnostics = vscode.languages.getDiagnostics(uri).filter(
+          d => d.source?.startsWith('chat-customizations-evaluations')
+        );
+        if (diagnostics.length > 0) {
+          urisWithDiagnostics.add(uri.toString());
+        } else {
+          urisWithDiagnostics.delete(uri.toString());
+        }
+      }
+      // Update context key based on the active editor
+      updateHasDiagnosticsContext();
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      updateHasDiagnosticsContext();
     })
   );
 
@@ -224,6 +255,12 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   console.log('Chat Customizations Evaluations extension activated');
+}
+
+function updateHasDiagnosticsContext(): void {
+  const editor = vscode.window.activeTextEditor;
+  const hasDiagnostics = editor ? urisWithDiagnostics.has(editor.document.uri.toString()) : false;
+  vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
 }
 
 /**

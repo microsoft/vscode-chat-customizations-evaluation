@@ -73,8 +73,12 @@
       {
         "command": "chatCustomizationsEvaluations.analyzePrompt",
         "title": "Analyze Prompt",
-        "category": "Chat Customizations Evaluations",
-        "icon": "$(beaker)"
+        "category": "Chat Customizations Evaluations"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.fixDiagnostics",
+        "title": "Fix Diagnostics",
+        "category": "Chat Customizations Evaluations"
       },
       {
         "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
@@ -88,7 +92,12 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
-          "when": "editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions"
+          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.fixDiagnostics",
+          "group": "inline",
+          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
         }
       ],
       "chat/customizations/item": [
@@ -98,7 +107,12 @@
           "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
         }
       ]
-    }
+    },
+    "chatSkills": [
+      {
+        "path": "./skills/fix-customization-evaluation-diagnostics/SKILL.md"
+      }
+    ]
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
