@@ -135,17 +135,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Register the server for prompt documents
     documentSelector: [
       { scheme: 'file', language: 'prompt' },
-      // Core prompt file types
-      { scheme: 'file', pattern: '**/*.prompt.md' },
-      { scheme: 'file', pattern: '**/*.agent.md' },
-      { scheme: 'file', pattern: '**/*.prompt' },
-      // Custom instructions
-      { scheme: 'file', pattern: '**/*.instructions.md' },
-      // Skills (Agent Skills standard + Claude legacy)
-      { scheme: 'file', language: 'markdown', pattern: '**/.github/skills/**/SKILL.md' },
-      { scheme: 'file', language: 'markdown', pattern: '**/.claude/skills/**/SKILL.md' },
-      { scheme: 'file', language: 'markdown', pattern: '**/skills/**/*.md' },
-      // Prompt folders
+      { scheme: 'file', language: 'agent' },
+      { scheme: 'file', language: 'skill' },
+      { scheme: 'file', language: 'instruction' },
       { scheme: 'file', language: 'markdown', pattern: '**/prompts/**/*.md' },
     ],
     synchronize: {
