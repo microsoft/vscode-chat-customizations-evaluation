@@ -93,6 +93,7 @@ export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
 
 connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { uri: string }) => {
   const document = documents.get(params.uri);
+  connection.console.log(`[Analysis] Received analyze request for ${params.uri}`);
   if (document) {
     runFullAnalysis(document);
   }
