@@ -138,7 +138,7 @@ export function activate(context: vscode.ExtensionContext) {
       { scheme: 'file', language: 'prompt' },
       { scheme: 'file', language: 'agent' },
       { scheme: 'file', language: 'skill' },
-      { scheme: 'file', language: 'instruction' },
+      { scheme: 'file', language: 'instructions' },
       { scheme: 'file', language: 'markdown', pattern: '**/prompts/**/*.md' },
     ],
     synchronize: {
