@@ -72,7 +72,7 @@
     "commands": [
       {
         "command": "chatCustomizationsEvaluations.analyzePrompt",
-        "title": "Analyze Prompt",
+        "title": "Analyze",
         "category": "Chat Customizations Evaluations"
       },
       {
@@ -82,7 +82,7 @@
       },
       {
         "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
-        "title": "Analyze Prompt",
+        "title": "Analyze",
         "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
       }
@@ -92,12 +92,12 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
-          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
+          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions)"
         },
         {
           "command": "chatCustomizationsEvaluations.fixDiagnostics",
           "group": "inline",
-          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == agent || editorLangId == skill || editorLangId == instructions)"
+          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions)"
         }
       ],
       "chat/customizations/item": [
