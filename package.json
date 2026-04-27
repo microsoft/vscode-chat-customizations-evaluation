@@ -66,6 +66,26 @@
           ],
           "default": "off",
           "description": "Traces the communication between VS Code and the language server"
+        },
+        "chatCustomizationsEvaluations.customDiagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Short name for this custom diagnostic"
+              },
+              "description": {
+                "type": "string",
+                "description": "Diagnostic instructions for the LLM analyzer"
+              }
+            },
+            "required": ["name", "description"],
+            "additionalProperties": false
+          },
+          "default": [],
+          "markdownDescription": "Array of custom diagnostics to apply during analysis. Each object has `name` and `description` fields. Example: add `[{\"name\": \"Output Schema\", \"description\": \"Flag if the prompt does not define a JSON output schema.\"}]`"
         }
       }
     },

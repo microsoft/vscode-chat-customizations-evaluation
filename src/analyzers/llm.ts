@@ -6,6 +6,7 @@ import {
   AnalysisResult,
   LLMProxyFn,
   LLMCombinedAnalysisResponse,
+  CustomDiagnosticConfig,
 } from '../types';
 
 /**
@@ -42,7 +43,7 @@ export class LLMAnalyzer {
     return !!this.proxyFn;
   }
 
-  async analyze(doc: TextDocument): Promise<AnalysisResult[]> {
+  async analyze(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
     if (!this.isAvailable()) {
       // Return a hint that LLM analysis is disabled
       return [{
@@ -62,7 +63,7 @@ export class LLMAnalyzer {
     try {
       // Run combined analysis + composition conflicts in parallel
       const settled = await Promise.allSettled([
-        this.analyzeCombined(doc),
+        this.analyzeCombined(doc, customDiagnostics),
         this.analyzeCompositionConflicts(doc),
       ]);
 
@@ -91,7 +92,34 @@ export class LLMAnalyzer {
    * Combined single-call analysis covering contradictions, ambiguity, persona,
    * cognitive load, and semantic coverage.
    */
-  private async analyzeCombined(doc: TextDocument): Promise<AnalysisResult[]> {
+  private async analyzeCombined(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
+    const hasCustomDiagnostics = customDiagnostics && customDiagnostics.length > 0;
+
+    const customDiagnosticsPrompt = hasCustomDiagnostics
+      ? `
+
+6. **Custom Diagnostics**: Evaluate the prompt against each of the following user-defined diagnostic requirements.
+
+<CUSTOM_DIAGNOSTICS_CONFIG>
+${customDiagnostics!.map((d, i) => `${i + 1}. **${d.name}**: ${d.description}`).join('\n')}
+</CUSTOM_DIAGNOSTICS_CONFIG>
+
+IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagnostic requirements and should be used to produce custom diagnostics findings for each.`
+      : '';
+
+    const customDiagnosticsSchema = hasCustomDiagnostics
+      ? `,
+  "custom_diagnostics": [
+    {
+      "title": "Name of the custom diagnostic from the config",
+      "description": "Specific issue found based on the custom diagnostic requirement",
+      "relevant_text": "exact text from the prompt where the issue appears",
+      "severity": "error"|"warning"|"info",
+      "suggestion": "Concrete rewrite or addition that resolves the issue"
+    }
+  ]`
+      : '';
+
     const prompt = `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
 
 Perform ALL of the following analyses:
@@ -101,6 +129,7 @@ Perform ALL of the following analyses:
 3. **Persona Consistency**: Find places where the expected tone, personality, or role contradicts itself. Explain the specific mismatch.
 4. **Cognitive Load**: Find overly complex instruction patterns (deeply nested conditions, too many competing priorities, unclear precedence). Explain why they are hard for a model to follow.
 5. **Semantic Coverage**: Find scenarios or edge cases the prompt doesn't address, where the model would have to guess. Explain what could go wrong.
+${customDiagnosticsPrompt}
 
 Prompt to analyze:
 <DOCUMENT_TO_ANALYZE>
@@ -168,17 +197,18 @@ Respond with a single JSON object in this exact format:
     ],
     "overall_coverage": "comprehensive"|"adequate"|"limited"|"minimal"
   }
+${customDiagnosticsSchema}
 }
 
 IMPORTANT:
 - All "instruction1", "instruction2", "text", and "relevant_text" fields MUST contain exact text copied from the prompt, so we can locate the issue precisely.
 - All "explanation", "problem", "description", and "suggestion" fields must be specific and actionable — never vague like "could be clearer" or "consider being more specific".
 - Suggestions must be concrete rewrites or additions, not abstract advice.
-- Use empty arrays [] for any category with no issues found.`;
+- Use empty arrays [] for any category with no issues found.
+- If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).`;
 
     const response = await this.callLLM(prompt);
     const results: AnalysisResult[] = [];
-
     try {
       const parsed = this.extractJSON<LLMCombinedAnalysisResponse>(response);
       this.processContradictions(doc, parsed, results);
@@ -186,6 +216,7 @@ IMPORTANT:
       this.processPersona(doc, parsed, results);
       this.processCognitiveLoad(doc, parsed, results);
       this.processCoverage(doc, parsed, results);
+      this.processCustomDiagnostics(doc, parsed, results);
     } catch {
       // JSON parse error, skip
     }
@@ -336,6 +367,26 @@ IMPORTANT:
         },
         analyzer: 'semantic-coverage',
         suggestion: err.suggestion,
+      });
+    }
+  }
+
+  private processCustomDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
+    for (const issue of parsed.custom_diagnostics || []) {
+      const relevantText = issue.relevant_text || issue.description;
+      const r = this.findTextRange(doc, relevantText);
+      const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
+
+      results.push({
+        code: 'custom-diagnostic',
+        message: `Custom diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
+        severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
+        range: {
+          start: { line: r.line, character: r.startChar },
+          end: { line: r.line, character: r.endChar },
+        },
+        analyzer: 'custom-diagnostics',
+        suggestion: issue.suggestion,
       });
     }
   }

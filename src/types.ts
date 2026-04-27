@@ -1,5 +1,10 @@
 import { Range } from 'vscode-languageserver';
 
+export interface CustomDiagnosticConfig {
+  name: string;
+  description: string;
+}
+
 export interface AnalysisResult {
   code: string;
   message: string;
@@ -88,6 +93,13 @@ export interface LLMCombinedAnalysisResponse {
     instruction1: string;
     instruction2: string;
     severity: 'error' | 'warning';
+    suggestion: string;
+  }[];
+  custom_diagnostics?: {
+    title: string;
+    description: string;
+    relevant_text: string;
+    severity: 'error' | 'warning' | 'info';
     suggestion: string;
   }[];
 }

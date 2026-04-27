@@ -22,6 +22,16 @@ interface LLMProxyResponse {
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const urisWithDiagnostics = new Set<string>();
 
+interface CustomDiagnosticConfig {
+  name: string;
+  description: string;
+}
+
+interface AnalyzeRequest {
+  uri: string;
+  customDiagnostics?: CustomDiagnosticConfig[];
+}
+
 let client: LanguageClient;
 let outputChannel: vscode.OutputChannel;
 let cachedModel: vscode.LanguageModelChat | undefined;
@@ -176,8 +186,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) {
+        const analyzeRequest: AnalyzeRequest = {
+          uri: editor.document.uri.toString(),
+          customDiagnostics: getCustomDiagnostics(),
+        };
+
         // Send notification to server to trigger full analysis
-        client.sendNotification('chatCustomizationsEvaluations/analyze', { uri: editor.document.uri.toString() });
+        client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
         vscode.window.showInformationMessage('Running prompt analysis...');
       }
     }),
@@ -200,7 +215,12 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      client.sendNotification('chatCustomizationsEvaluations/analyze', { uri: uri.toString() });
+      const analyzeRequest: AnalyzeRequest = {
+        uri: uri.toString(),
+        customDiagnostics: getCustomDiagnostics(),
+      };
+
+      client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
       const document = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
       void vscode.window.showInformationMessage('Running prompt analysis...');
@@ -253,6 +273,12 @@ function updateHasDiagnosticsContext(): void {
   const editor = vscode.window.activeTextEditor;
   const hasDiagnostics = editor ? urisWithDiagnostics.has(editor.document.uri.toString()) : false;
   vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
+}
+
+function getCustomDiagnostics(): CustomDiagnosticConfig[] | undefined {
+  const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+  const diagnostics = configuration.get<CustomDiagnosticConfig[]>('customDiagnostics', []);
+  return diagnostics.length > 0 ? diagnostics : undefined;
 }
 
 /**

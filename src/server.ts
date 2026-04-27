@@ -12,7 +12,7 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { LLMAnalyzer } from './analyzers/llm';
-import { AnalysisResult, LLMProxyRequest, LLMProxyResponse } from './types';
+import { AnalysisResult, LLMProxyRequest, LLMProxyResponse, CustomDiagnosticConfig } from './types';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -53,10 +53,10 @@ connection.onInitialized(() => {
 });
 
 // Analysis is triggered manually via the command / status bar button only.
-async function runFullAnalysis(textDocument: TextDocument): Promise<void> {
+async function runFullAnalysis(textDocument: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<void> {
   const uri = textDocument.uri;
 
-  const llmResults = await llmAnalyzer.analyze(textDocument);
+  const llmResults = await llmAnalyzer.analyze(textDocument, customDiagnostics);
 
   const diagnostics = resultsToDiagnostics(llmResults);
   connection.sendDiagnostics({ uri, diagnostics });
@@ -91,11 +91,11 @@ export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
   });
 }
 
-connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { uri: string }) => {
+connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { uri: string; customDiagnostics?: CustomDiagnosticConfig[] }) => {
   const document = documents.get(params.uri);
   connection.console.log(`[Analysis] Received analyze request for ${params.uri}`);
   if (document) {
-    runFullAnalysis(document);
+    runFullAnalysis(document, params.customDiagnostics);
   }
 });
 
