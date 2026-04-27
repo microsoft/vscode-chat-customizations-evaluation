@@ -1,6 +1,6 @@
 {
   "name": "vscode-chat-customizations-evaluations",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "ms-vscode",
   "displayName": "Chat Customizations Evaluations",
   "description": "Extension for analyzing, validating, and improving AI prompts",
