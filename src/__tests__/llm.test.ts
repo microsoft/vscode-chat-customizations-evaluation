@@ -227,6 +227,37 @@ describe('LLMAnalyzer', () => {
       // Verify findTextRange resolved the correct line (line 0 contains "be professional")
       expect(ambiguity[0].range.start.line).toBe(0);
     });
+
+    it('should include custom diagnostics from custom diagnostics config', async () => {
+      const mockProxy = vi.fn().mockResolvedValue({
+        text: JSON.stringify({
+          contradictions: [],
+          ambiguity_issues: [],
+          persona_issues: [],
+          cognitive_load: { issues: [], overall_complexity: 'low' },
+          coverage_analysis: {},
+          custom_diagnostics: [{
+            title: 'Output Schema Validation',
+            description: 'The prompt does not define the expected JSON schema for output.',
+            relevant_text: 'Return output as JSON.',
+            severity: 'warning',
+            suggestion: 'Add a full JSON schema with required fields and types.',
+          }],
+        }),
+      });
+      analyzer.setProxyFn(mockProxy);
+
+      const doc = makeDoc('Return output as JSON.');
+      const customConfigs = [
+        { name: 'Output Schema Validation', description: 'Flag missing explicit output schema requirements.' },
+      ];
+      const results = await analyzer.analyze(doc, customConfigs);
+      const customDiagnostics = results.filter(r => r.code === 'custom-diagnostic');
+
+      expect(customDiagnostics.length).toBeGreaterThan(0);
+      expect(customDiagnostics[0].severity).toBe('warning');
+      expect(customDiagnostics[0].range.start.line).toBe(0);
+    });
   });
 });
 

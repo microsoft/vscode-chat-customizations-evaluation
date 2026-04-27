@@ -60,6 +60,7 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 |---------|---------|-------------|
 | `chatCustomizationsEvaluations.enable` | `true` | Enable/disable the extension |
 | `chatCustomizationsEvaluations.trace.server` | `off` | Trace communication between VS Code and the language server |
+| `chatCustomizationsEvaluations.customDiagnostics` | `[]` | Array of custom diagnostic objects with `name` and `description` fields |
 
 ## Architecture
 
