@@ -112,12 +112,12 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
-          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions)"
+          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions || resourceFilename == AGENTS.md)"
         },
         {
           "command": "chatCustomizationsEvaluations.fixDiagnostics",
           "group": "inline",
-          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions)"
+          "when": "chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions || resourceFilename == AGENTS.md)"
         }
       ],
       "chat/customizations/item": [

@@ -149,6 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
       { scheme: 'file', language: 'agent' },
       { scheme: 'file', language: 'skill' },
       { scheme: 'file', language: 'instructions' },
+      { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
       { scheme: 'file', language: 'markdown', pattern: '**/prompts/**/*.md' },
     ],
     synchronize: {
@@ -215,14 +216,15 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+
       const analyzeRequest: AnalyzeRequest = {
         uri: uri.toString(),
         customDiagnostics: getCustomDiagnostics(),
       };
 
       client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      const document = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
       void vscode.window.showInformationMessage('Running prompt analysis...');
     })
   );

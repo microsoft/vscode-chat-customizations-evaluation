@@ -492,7 +492,9 @@ If no conflicts found, return {"conflicts": []}`;
       const target = match[2].trim().split('#')[0];
       if (!target) continue;
       if (/^(https?:|mailto:)/i.test(target)) continue;
-      if (!promptExtensions.some(ext => target.toLowerCase().endsWith(ext))) continue;
+      const normalizedTarget = target.toLowerCase();
+      const isSupportFile = path.basename(normalizedTarget) === 'agents.md';
+      if (!isSupportFile && !promptExtensions.some(ext => normalizedTarget.endsWith(ext))) continue;
 
       const resolved = path.resolve(docDir, target);
       try {
