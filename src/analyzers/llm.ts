@@ -8,6 +8,7 @@ import {
   LLMCombinedAnalysisResponse,
   CustomDiagnosticConfig,
 } from '../types';
+import { extractJSON, findTextRange } from './llm-utils';
 
 /**
  * LLM-powered analyzer for semantic analysis
@@ -18,16 +19,6 @@ export class LLMAnalyzer {
 
   /** Maximum total characters to include in composed text sent to LLM */
   private static readonly MAX_COMPOSED_SIZE = 100_000;
-
-  /**
-   * Extract JSON from an LLM response that may be wrapped in markdown code fences.
-   */
-  private extractJSON<T>(text: string): T {
-    // Strip markdown code fences: ```json ... ``` or ``` ... ```
-    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    const jsonStr = fenceMatch ? fenceMatch[1].trim() : text.trim();
-    return JSON.parse(jsonStr) as T;
-  }
 
   /**
    * Set a proxy function for LLM calls (vscode.lm / Copilot integration).
@@ -210,7 +201,7 @@ IMPORTANT:
     const response = await this.callLLM(prompt);
     const results: AnalysisResult[] = [];
     try {
-      const parsed = this.extractJSON<LLMCombinedAnalysisResponse>(response);
+      const parsed = extractJSON<LLMCombinedAnalysisResponse>(response);
       this.processContradictions(doc, parsed, results);
       this.processAmbiguity(doc, parsed, results);
       this.processPersona(doc, parsed, results);
@@ -226,8 +217,8 @@ IMPORTANT:
 
   private processContradictions(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const c of parsed.contradictions || []) {
-      const r1 = this.findTextRange(doc, c.instruction1);
-      const r2 = this.findTextRange(doc, c.instruction2);
+      const r1 = findTextRange(doc, c.instruction1);
+      const r2 = findTextRange(doc, c.instruction2);
 
       results.push({
         code: 'contradiction',
@@ -257,7 +248,7 @@ IMPORTANT:
 
   private processAmbiguity(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.ambiguity_issues || []) {
-      const r = this.findTextRange(doc, issue.text);
+      const r = findTextRange(doc, issue.text);
       const problem = issue.problem ? `${issue.problem} ` : '';
       results.push({
         code: 'ambiguity-llm',
@@ -275,7 +266,7 @@ IMPORTANT:
 
   private processPersona(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.persona_issues || []) {
-      const r = this.findTextRange(doc, issue.relevant_text);
+      const r = findTextRange(doc, issue.relevant_text);
       results.push({
         code: 'persona-inconsistency',
         message: `Persona conflict: ${issue.description}. The prompt sets "${issue.trait1}" but also "${issue.trait2}". Suggestion: ${issue.suggestion}`,
@@ -308,7 +299,7 @@ IMPORTANT:
     }
 
     for (const issue of cogLoad.issues || []) {
-      const r = this.findTextRange(doc, issue.relevant_text);
+      const r = findTextRange(doc, issue.relevant_text);
       results.push({
         code: `cognitive-${issue.type}`,
         message: `Cognitive load (${issue.type}): ${issue.description}. Suggestion: ${issue.suggestion}`,
@@ -341,7 +332,7 @@ IMPORTANT:
     }
 
     for (const gap of analysis.coverage_gaps || []) {
-      const r = this.findTextRange(doc, gap.relevant_text);
+      const r = findTextRange(doc, gap.relevant_text);
       results.push({
         code: 'coverage-gap',
         message: `Coverage gap: ${gap.gap}. Suggestion: ${gap.suggestion}`,
@@ -356,7 +347,7 @@ IMPORTANT:
     }
 
     for (const err of analysis.missing_error_handling || []) {
-      const r = this.findTextRange(doc, err.relevant_text);
+      const r = findTextRange(doc, err.relevant_text);
       results.push({
         code: 'missing-error-handling',
         message: `Missing error handling: ${err.scenario}. Suggestion: ${err.suggestion}`,
@@ -374,7 +365,7 @@ IMPORTANT:
   private processCustomDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.custom_diagnostics || []) {
       const relevantText = issue.relevant_text || issue.description;
-      const r = this.findTextRange(doc, relevantText);
+      const r = findTextRange(doc, relevantText);
       const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
 
       results.push({
@@ -449,9 +440,9 @@ If no conflicts found, return {"conflicts": []}`;
     const results: AnalysisResult[] = [];
 
     try {
-      const parsed = this.extractJSON<{ conflicts?: LLMCombinedAnalysisResponse['composition_conflicts'] }>(response);
+      const parsed = extractJSON<{ conflicts?: LLMCombinedAnalysisResponse['composition_conflicts'] }>(response);
       for (const conflict of parsed.conflicts || []) {
-        const r = this.findTextRange(doc, conflict.instruction1);
+        const r = findTextRange(doc, conflict.instruction1);
         results.push({
           code: 'composition-conflict',
           message: `Composition conflict: ${conflict.summary}. "${conflict.instruction1}" vs "${conflict.instruction2}"`,
@@ -504,38 +495,6 @@ If no conflicts found, return {"conflicts": []}`;
     }
 
     return results;
-  }
-
-  /**
-   * Find the location of a piece of text in the document, returning line and column offsets.
-   */
-  private findTextRange(doc: TextDocument, text: string): { line: number; startChar: number; endChar: number } {
-    if (!text) return { line: 0, startChar: 0, endChar: doc.getText().split('\n')[0]?.length || 0 };
-
-    const lines = doc.getText().split('\n');
-    const lowerText = text.toLowerCase();
-
-    // Exact substring match
-    for (let i = 0; i < lines.length; i++) {
-      const col = lines[i].toLowerCase().indexOf(lowerText);
-      if (col !== -1) {
-        return { line: i, startChar: col, endChar: col + text.length };
-      }
-    }
-
-    // Partial word match — find the best line and highlight the matched word
-    const words = lowerText.split(/\s+/).filter(w => w.length > 3).slice(0, 5);
-    for (let i = 0; i < lines.length; i++) {
-      const lowerLine = lines[i].toLowerCase();
-      for (const word of words) {
-        const col = lowerLine.indexOf(word);
-        if (col !== -1) {
-          return { line: i, startChar: col, endChar: col + word.length };
-        }
-      }
-    }
-
-    return { line: 0, startChar: 0, endChar: lines[0]?.length || 0 };
   }
 
   /**
