@@ -81,11 +81,19 @@
                 "description": "Diagnostic instructions for the LLM analyzer"
               }
             },
-            "required": ["name", "description"],
+            "required": [
+              "name",
+              "description"
+            ],
             "additionalProperties": false
           },
           "default": [],
           "markdownDescription": "Array of custom diagnostics to apply during analysis. Each object has `name` and `description` fields. Example: add `[{\"name\": \"Output Schema\", \"description\": \"Flag if the prompt does not define a JSON output schema.\"}]`"
+        },
+        "chatCustomizationsEvaluations.waza.command": {
+          "type": "string",
+          "default": "waza",
+          "description": "Command used to invoke waza (for example: waza, /usr/local/bin/waza)"
         }
       }
     },
@@ -105,6 +113,24 @@
         "title": "Analyze",
         "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.wazaCreateEval",
+        "title": "Create Waza Eval Scaffold",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.wazaRunEval",
+        "title": "Run Waza Evaluation",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(play)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.wazaDownloadBinary",
+        "title": "Download Waza Binary",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -123,6 +149,21 @@
       "chat/customizations/item": [
         {
           "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+          "group": "inline",
+          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.wazaCreateEval",
+          "group": "inline",
+          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.wazaRunEval",
+          "group": "inline",
+          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.wazaDownloadBinary",
           "group": "inline",
           "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instruction || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
         }

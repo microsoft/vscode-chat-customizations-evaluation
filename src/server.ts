@@ -12,7 +12,12 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { LLMAnalyzer } from './analyzers/llm';
-import { AnalysisResult, LLMProxyRequest, LLMProxyResponse, CustomDiagnosticConfig } from './types';
+import {
+  AnalysisResult,
+  LLMProxyRequest,
+  LLMProxyResponse,
+  CustomDiagnosticConfig,
+} from './types';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -53,7 +58,10 @@ connection.onInitialized(() => {
 });
 
 // Analysis is triggered manually via the command / status bar button only.
-async function runFullAnalysis(textDocument: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<void> {
+async function runFullAnalysis(
+  textDocument: TextDocument,
+  customDiagnostics?: CustomDiagnosticConfig[],
+): Promise<void> {
   const uri = textDocument.uri;
 
   const llmResults = await llmAnalyzer.analyze(textDocument, customDiagnostics);
@@ -91,7 +99,10 @@ export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
   });
 }
 
-connection.onNotification('chatCustomizationsEvaluations/analyze', (params: { uri: string; customDiagnostics?: CustomDiagnosticConfig[] }) => {
+connection.onNotification('chatCustomizationsEvaluations/analyze', (params: {
+  uri: string;
+  customDiagnostics?: CustomDiagnosticConfig[];
+}) => {
   const document = documents.get(params.uri);
   connection.console.log(`[Analysis] Received analyze request for ${params.uri}`);
   if (document) {
