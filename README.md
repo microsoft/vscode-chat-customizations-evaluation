@@ -15,6 +15,12 @@ A Language Server Protocol implementation for analyzing and improving AI prompt 
 - **Semantic Coverage** — Identifies gaps in intent handling and missing error paths
 - **Composition Conflict Analysis** — Detects conflicts between a prompt and other prompt files it imports via markdown links
 
+### Waza Integration
+
+- **Create Eval Scaffold** — Generates eval files for a skill via `waza new eval <skill-name>`
+- **Run Evaluation** — Executes skill evaluation via `waza run <eval.yaml> --context-dir <skill-dir>`
+- **Automatic Local Fallback** — If `waza` is not on `PATH`, commands attempt a local fallback via `go run ./cmd/waza` when a sibling `waza` repo is available
+
 ### Editor Integration
 
 - **Editor Title Bar** — Analyze Prompt button appears when editing prompt files
@@ -53,6 +59,9 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 | Command | Description |
 |---------|-------------|
 | `Chat Customizations Evaluations: Analyze Prompt` | Run full LLM-powered analysis on the active file |
+| `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `eval.yaml` and task files for the active skill |
+| `Chat Customizations Evaluations: Run Waza Evaluation` | Run the skill's eval suite |
+| `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific waza binary and configure the extension to use it |
 
 ### Configuration
 
@@ -61,6 +70,7 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 | `chatCustomizationsEvaluations.enable` | `true` | Enable/disable the extension |
 | `chatCustomizationsEvaluations.trace.server` | `off` | Trace communication between VS Code and the language server |
 | `chatCustomizationsEvaluations.customDiagnostics` | `[]` | Array of custom diagnostic objects with `name` and `description` fields |
+| `chatCustomizationsEvaluations.waza.command` | `waza` | Command used to run waza (for example `/usr/local/bin/waza`) |
 
 ## Architecture
 
