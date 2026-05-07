@@ -42,6 +42,32 @@ chat-customizations-evaluations/
 └── vitest.config.ts        # Test configuration
 ```
 
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Prompt Document                         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    LLM Analysis                             │
+│                                                             │
+│  • Contradictions & persona consistency                     │
+│  • Ambiguity & cognitive load                               │
+│  • Coverage gaps & missing error handling                   │
+│  • Composition conflicts (cross-file)                       │
+│                                                             │
+│  Triggered: manually via command                            │
+│  Powered by: GitHub Copilot (vscode.lm API)                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Diagnostics → Problems Panel                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ### Development Workflow
 
 1. **Make changes** to the server (`src/`) or client (`client/src/`)
@@ -67,6 +93,14 @@ npm run watch
 # Terminal 2: Watch client changes
 cd client && npm run watch
 ```
+
+### Build Commands
+
+- `npm run compile` — Build server only
+- `npm run build` — Build server + client
+- `npm test` — Run tests (vitest)
+- `npx vitest` — Run tests in watch mode
+- `npm run lint` — Run ESLint
 
 ## Writing Tests
 
