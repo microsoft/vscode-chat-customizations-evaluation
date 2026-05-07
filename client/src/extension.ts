@@ -512,16 +512,15 @@ export function activate(context: vscode.ExtensionContext) {
     // Register the server for prompt documents
     documentSelector: [
       { scheme: 'file', language: 'prompt' },
-      { scheme: 'file', language: 'agent' },
+      { scheme: 'file', language: 'chatagent' },
       { scheme: 'file', language: 'skill' },
       { scheme: 'file', language: 'instructions' },
-      { scheme: 'file', language: 'markdown', pattern: '**/prompts/**/*.md' },
+      { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
     ],
     synchronize: {
       // Notify the server about file changes to prompt files
       fileEvents: [
-        vscode.workspace.createFileSystemWatcher('**/*.{prompt.md,agent.md,prompt,instructions.md}'),
-        vscode.workspace.createFileSystemWatcher('**/skills/**/SKILL.md'),
+        vscode.workspace.createFileSystemWatcher('**/*{prompt.md, agent.md, instructions.md, SKILL.md, AGENTS.md}')
       ],
     },
     outputChannel,
