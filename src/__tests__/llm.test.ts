@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LLMAnalyzer } from '../analyzers/llm';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -257,6 +260,32 @@ describe('LLMAnalyzer', () => {
       expect(customDiagnostics.length).toBeGreaterThan(0);
       expect(customDiagnostics[0].severity).toBe('warning');
       expect(customDiagnostics[0].range.start.line).toBe(0);
+    });
+  });
+
+  describe('readLinkedPromptFiles', () => {
+    it('should include linked agents.md support files', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-analyzer-'));
+
+      try {
+        const supportFile = path.join(tempDir, 'agents.md');
+        fs.writeFileSync(supportFile, 'Support instructions');
+
+        const doc = TextDocument.create(
+          `file://${path.join(tempDir, 'test.prompt.md')}`,
+          'prompt',
+          1,
+          '[support](./agents.md)'
+        );
+
+        const linkedFiles = await (analyzer as any).readLinkedPromptFiles(doc);
+
+        expect(linkedFiles).toEqual([
+          { target: './agents.md', content: 'Support instructions' },
+        ]);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 });

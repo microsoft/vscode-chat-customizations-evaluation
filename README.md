@@ -34,6 +34,7 @@ A Language Server Protocol implementation for analyzing and improving AI prompt 
 | `*.prompt.md` | Prompt |
 | `*.agent.md` | Agent |
 | `*.instructions.md` | Instructions |
+| `AGENTS.md` | AI coding assistance instruction |
 
 ## Installation
 
