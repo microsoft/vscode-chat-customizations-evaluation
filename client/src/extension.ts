@@ -24,6 +24,7 @@ interface LLMProxyResponse {
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const urisWithDiagnostics = new Set<string>();
+const pendingAnalysisUris = new Set<string>();
 const WAZA_USER_GUIDE_FALLBACK = `# Waza User Guide
 
 This guide explains how to use waza from the Chat Customizations Evaluations extension.
@@ -556,6 +557,7 @@ export function activate(context: vscode.ExtensionContext) {
           customDiagnostics: getCustomDiagnostics(),
         };
 
+        pendingAnalysisUris.add(editor.document.uri.toString());
         // Send notification to server to trigger full analysis
         client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
         vscode.window.showInformationMessage('Running prompt analysis...');
@@ -585,6 +587,7 @@ export function activate(context: vscode.ExtensionContext) {
         customDiagnostics: getCustomDiagnostics(),
       };
 
+      pendingAnalysisUris.add(uri.toString());
       client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
       const document = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
@@ -736,13 +739,18 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.languages.onDidChangeDiagnostics((e) => {
       for (const uri of e.uris) {
-        const diagnostics = vscode.languages.getDiagnostics(uri).filter(
-          d => d.source?.startsWith('chat-customizations-evaluations')
-        );
+        const diagnostics = getExtensionDiagnostics(uri);
         if (diagnostics.length > 0) {
           urisWithDiagnostics.add(uri.toString());
         } else {
           urisWithDiagnostics.delete(uri.toString());
+        }
+
+        if (pendingAnalysisUris.has(uri.toString())) {
+          pendingAnalysisUris.delete(uri.toString());
+          if (diagnostics.length > 0) {
+            notifyAndFocusProblems(uri, diagnostics);
+          }
         }
       }
       // Update context key based on the active editor
@@ -779,6 +787,35 @@ function updateHasDiagnosticsContext(): void {
   const editor = vscode.window.activeTextEditor;
   const hasDiagnostics = editor ? urisWithDiagnostics.has(editor.document.uri.toString()) : false;
   vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
+}
+
+function getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
+  return vscode.languages.getDiagnostics(uri).filter(
+    d => d.source?.startsWith('chat-customizations-evaluations')
+  );
+}
+
+async function notifyAndFocusProblems(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): Promise<void> {
+  void vscode.window.showInformationMessage(`${diagnostics.length} diagnostics found`);
+
+  await vscode.commands.executeCommand('workbench.actions.view.problems');
+  await vscode.commands.executeCommand('workbench.action.problems.focus');
+  await vscode.commands.executeCommand('list.focusFirst');
+  await vscode.commands.executeCommand('list.select');
+
+  const document = await vscode.workspace.openTextDocument(uri);
+  const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
+  const firstDiagnostic = diagnostics
+    .slice()
+    .sort((a, b) => {
+      if (a.range.start.line !== b.range.start.line) {
+        return a.range.start.line - b.range.start.line;
+      }
+      return a.range.start.character - b.range.start.character;
+    })[0];
+
+  editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
+  editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
 }
 
 function getCustomDiagnostics(): CustomDiagnosticConfig[] | undefined {
