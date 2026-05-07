@@ -184,6 +184,12 @@
       {
         "path": "./skills/fix-customization-evaluation-diagnostics/SKILL.md"
       }
+    ],
+    "yamlValidation": [
+      {
+        "fileMatch": "eval.yaml",
+        "url": "https://raw.githubusercontent.com/microsoft/waza/refs/heads/main/schemas/eval.schema.json"
+      }
     ]
   },
   "dependencies": {
