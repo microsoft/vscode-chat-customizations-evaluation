@@ -94,6 +94,11 @@
           "type": "string",
           "default": "waza",
           "description": "Command used to invoke waza (for example: waza, /usr/local/bin/waza)"
+        },
+        "chatCustomizationsEvaluations.waza.alwaysRunAfterFixDiagnostics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run an existing waza eval after Fix Diagnostics applies improvements"
         }
       }
     },

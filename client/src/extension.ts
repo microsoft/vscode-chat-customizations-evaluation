@@ -380,6 +380,11 @@ interface SkillContext {
   workspaceRoot: string;
 }
 
+interface EvalScaffoldSummary {
+  evalPath: string;
+  createdFiles: string[];
+}
+
 interface CommandResult {
   stdout: string;
   stderr: string;
@@ -567,10 +572,25 @@ export function activate(context: vscode.ExtensionContext) {
       if (!editor) {
         return;
       }
+
+      const targetUri = editor.document.uri;
+      const initialText = editor.document.getText();
       await vscode.commands.executeCommand('workbench.action.chat.open', {
         query: '/fix-customization-evaluation-diagnostics',
         isPartialQuery: false,
       });
+
+      const hasImprovements = await waitForDocumentImprovements(targetUri, initialText, FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS);
+      if (!hasImprovements) {
+        return;
+      }
+
+      const skillContext = resolveSkillContext({ uri: targetUri });
+      if (!skillContext) {
+        return;
+      }
+
+      await handlePostFixDiagnosticsFlow(skillContext);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
       outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
@@ -599,32 +619,11 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const scaffoldCwd = resolveWazaScaffoldCwd(context);
-      outputChannel.show(true);
-      outputChannel.appendLine(`[Waza] Creating eval scaffold for ${context.skillName}`);
-      outputChannel.appendLine(`[Waza] Command: ${getWazaCommand()} new eval ${context.skillName}`);
-      outputChannel.appendLine(`[Waza] CWD: ${scaffoldCwd}`);
-
-      const result = await runWazaCommand(
-        ['new', 'eval', context.skillName],
-        scaffoldCwd,
-        WAZA_CREATE_TIMEOUT_MS,
-      );
-
-      let finalResult = result;
-      const resultText = `${result.stderr}\n${result.stdout}`;
-      if (result.exitCode !== 0 && isWazaSkillLookupError(resultText)) {
-        outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
-        finalResult = await runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
-      }
-
-      if (finalResult.exitCode !== 0) {
-        outputChannel.appendLine(`[Waza] eval scaffold failed\n${finalResult.stderr || finalResult.stdout}`);
-        void vscode.window.showErrorMessage('Failed to create waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
+      const scaffold = await createWazaEvalScaffold(context);
+      if (!scaffold) {
         return;
       }
 
-      outputChannel.appendLine(`[Waza] eval scaffold created for ${context.skillName}\n${finalResult.stdout}`);
       void vscode.window.showInformationMessage(`Created waza eval scaffold for ${context.skillName}.`);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEval', async (obj) => {
@@ -1313,6 +1312,227 @@ function runCommand(command: string, args: string[], cwd: string, timeoutMs?: nu
   });
 }
 
+function waitForDocumentImprovements(uri: vscode.Uri, initialText: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const dispose = vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.uri.toString() !== uri.toString()) {
+        return;
+      }
+
+      if (event.document.getText() === initialText) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      dispose.dispose();
+      resolve(true);
+    });
+
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      dispose.dispose();
+      resolve(false);
+    }, timeoutMs);
+  });
+}
+
+async function handlePostFixDiagnosticsFlow(context: SkillContext): Promise<void> {
+  const evalPath = findEvalPath(context);
+  if (evalPath) {
+    await handleExistingEvalAfterFix(context, evalPath);
+    return;
+  }
+
+  await handleMissingEvalAfterFix(context);
+}
+
+async function handleExistingEvalAfterFix(context: SkillContext, evalPath: string): Promise<void> {
+  if (getAlwaysRunEvalsAfterFixDiagnostics()) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaRunEval', { uri: context.uri });
+    return;
+  }
+
+  const runNow = 'Run Eval';
+  const alwaysRun = 'Always Run Evals After Fix Diagnostics';
+  const docs = 'Waza Docs';
+  const action = await vscode.window.showInformationMessage(
+    `Diagnostics were fixed for ${context.skillName}. Found existing eval at ${path.relative(context.workspaceRoot, evalPath)}. Run it now?`,
+    runNow,
+    alwaysRun,
+    docs,
+  );
+
+  if (action === docs) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.openWazaUserGuide');
+    return;
+  }
+
+  if (action === alwaysRun) {
+    await setAlwaysRunEvalsAfterFixDiagnostics(true);
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaRunEval', { uri: context.uri });
+    return;
+  }
+
+  if (action === runNow) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaRunEval', { uri: context.uri });
+  }
+}
+
+async function handleMissingEvalAfterFix(context: SkillContext): Promise<void> {
+  const create = 'Create Evals';
+  const docs = 'Waza Docs';
+  const action = await vscode.window.showInformationMessage(
+    `Diagnostics were fixed for ${context.skillName}. No eval.yaml found. Create evals powered by waza now? You can also run the "Create Waza Eval Scaffold" command later.`,
+    create,
+    docs,
+  );
+
+  if (action === docs) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.openWazaUserGuide');
+    return;
+  }
+
+  if (action !== create) {
+    return;
+  }
+
+  const ensured = await ensureWazaInstalled(context.workspaceRoot);
+  if (!ensured) {
+    return;
+  }
+
+  const summary = await createWazaEvalScaffold(context);
+  if (!summary) {
+    return;
+  }
+
+  const evalUri = vscode.Uri.file(summary.evalPath);
+  const document = await vscode.workspace.openTextDocument(evalUri);
+  await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+
+  const relativeEvalPath = path.relative(context.workspaceRoot, summary.evalPath);
+  const relativeFiles = summary.createdFiles
+    .map(file => path.relative(context.workspaceRoot, file))
+    .slice(0, 3);
+  const fileSummary = relativeFiles.length > 0
+    ? ` Created files include: ${relativeFiles.join(', ')}${summary.createdFiles.length > 3 ? ', ...' : ''}.`
+    : '';
+
+  const runEval = 'Run Eval';
+  const openDocs = 'Waza Docs';
+  const notificationAction = await vscode.window.showInformationMessage(
+    `Created waza scaffold at ${relativeEvalPath}.${fileSummary}`,
+    runEval,
+    openDocs,
+  );
+
+  if (notificationAction === runEval) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaRunEval', { uri: context.uri });
+  }
+
+  if (notificationAction === openDocs) {
+    await vscode.commands.executeCommand('chatCustomizationsEvaluations.openWazaUserGuide');
+  }
+}
+
+function getAlwaysRunEvalsAfterFixDiagnostics(): boolean {
+  const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+  return configuration.get<boolean>('waza.alwaysRunAfterFixDiagnostics', false);
+}
+
+async function setAlwaysRunEvalsAfterFixDiagnostics(value: boolean): Promise<void> {
+  const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+  await configuration.update('waza.alwaysRunAfterFixDiagnostics', value, vscode.ConfigurationTarget.Global);
+}
+
+async function ensureWazaInstalled(cwd: string): Promise<boolean> {
+  const probe = await runWazaCommand(['--version'], cwd, 10_000);
+  if (probe.exitCode === 0) {
+    return true;
+  }
+
+  outputChannel.appendLine('[Waza] waza command unavailable; downloading managed binary.');
+
+  try {
+    const installPath = await downloadAndInstallWazaBinary();
+    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+    await configuration.update('waza.command', installPath, vscode.ConfigurationTarget.Global);
+    outputChannel.appendLine(`[Waza] Installed managed binary at ${installPath}`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    outputChannel.appendLine(`[Waza] Failed to install managed binary: ${message}`);
+    void vscode.window.showErrorMessage(`Failed to install waza binary: ${message}`);
+    return false;
+  }
+}
+
+async function createWazaEvalScaffold(context: SkillContext): Promise<EvalScaffoldSummary | undefined> {
+  const scaffoldCwd = resolveWazaScaffoldCwd(context);
+  outputChannel.show(true);
+  outputChannel.appendLine(`[Waza] Creating eval scaffold for ${context.skillName}`);
+  outputChannel.appendLine(`[Waza] Command: ${getWazaCommand()} new eval ${context.skillName}`);
+  outputChannel.appendLine(`[Waza] CWD: ${scaffoldCwd}`);
+
+  const result = await runWazaCommand(
+    ['new', 'eval', context.skillName],
+    scaffoldCwd,
+    WAZA_CREATE_TIMEOUT_MS,
+  );
+
+  let finalResult = result;
+  const resultText = `${result.stderr}\n${result.stdout}`;
+  if (result.exitCode !== 0 && isWazaSkillLookupError(resultText)) {
+    outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
+    finalResult = await runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
+  }
+
+  if (finalResult.exitCode !== 0) {
+    outputChannel.appendLine(`[Waza] eval scaffold failed\n${finalResult.stderr || finalResult.stdout}`);
+    void vscode.window.showErrorMessage('Failed to create waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
+    return undefined;
+  }
+
+  outputChannel.appendLine(`[Waza] eval scaffold created for ${context.skillName}\n${finalResult.stdout}`);
+
+  const evalPath = findEvalPath(context);
+  if (!evalPath) {
+    return undefined;
+  }
+
+  const createdFiles = collectEvalScaffoldFiles(evalPath);
+  return { evalPath, createdFiles };
+}
+
+function collectEvalScaffoldFiles(evalPath: string): string[] {
+  const root = path.dirname(evalPath);
+  const files: string[] = [];
+
+  const visit = (dir: string): void => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else {
+        files.push(entryPath);
+      }
+    }
+  };
+
+  if (fs.existsSync(root)) {
+    visit(root);
+  }
+
+  files.sort();
+  return files;
+}
+
 /**
  * Handle LLM proxy requests from the language server using vscode.lm API.
  * This lets the extension use the user's Copilot subscription instead of requiring API keys.
@@ -1366,6 +1586,7 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
 
 const LLM_REQUEST_TIMEOUT_MS = 30_000;
 const WAZA_CREATE_TIMEOUT_MS = 30_000;
+const FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS = 5 * 60_000;
 
 async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxyResponse> {
   const cts = new vscode.CancellationTokenSource();
