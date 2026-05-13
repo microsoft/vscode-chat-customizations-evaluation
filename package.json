@@ -154,7 +154,7 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
-          "when": "!chatCustomizationsEvaluations.hasDiagnostics && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions || resourceFilename == AGENTS.md)"
+          "when": "!chatCustomizationsEvaluations.hasDiagnostics && !chatCustomizationsEvaluations.isAnalyzing && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions || resourceFilename == AGENTS.md)"
         },
         {
           "command": "chatCustomizationsEvaluations.fixDiagnostics",
@@ -171,7 +171,7 @@
         {
           "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
           "group": "inline",
-          "when": "aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instructions || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent"
+          "when": "!chatCustomizationsEvaluations.isAnalyzing && (aiCustomizationManagementItemType == prompt || aiCustomizationManagementItemType == instructions || aiCustomizationManagementItemType == skill || aiCustomizationManagementItemType == agent)"
         },
         {
           "command": "chatCustomizationsEvaluations.wazaCreateEval",
