@@ -789,17 +789,18 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', () => {
       const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        const analyzeRequest: AnalyzeRequest = {
-          uri: editor.document.uri.toString(),
-          customDiagnostics: getCustomDiagnostics(),
-        };
+      if (!editor) return;
+      if (pendingAnalysisUris.has(editor.document.uri.toString())) return;
 
-        beginAnalysis(editor.document.uri.toString());
-        markAnalysisStage('Submitting analysis request...');
-        // Send notification to server to trigger full analysis
-        client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      }
+      const analyzeRequest: AnalyzeRequest = {
+        uri: editor.document.uri.toString(),
+        customDiagnostics: getCustomDiagnostics(),
+      };
+
+      beginAnalysis(editor.document.uri.toString());
+      markAnalysisStage('Submitting analysis request...');
+      // Send notification to server to trigger full analysis
+      client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async () => {
       const editor = vscode.window.activeTextEditor;
@@ -1875,6 +1876,9 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  if (statusBarCompletionTimer) {
+    clearTimeout(statusBarCompletionTimer);
+  }
   if (!client) {
     return undefined;
   }
