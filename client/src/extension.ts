@@ -25,6 +25,188 @@ interface LLMProxyResponse {
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const urisWithDiagnostics = new Set<string>();
 const pendingAnalysisUris = new Set<string>();
+const analysisStatesByUri = new Map<string, AnalysisState>();
+let analysisStatusBarItem: vscode.StatusBarItem | undefined;
+
+interface AnalysisState {
+  startedAt: number;
+  stage: string;
+  llmRequestsInFlight: number;
+  progressReporter?: vscode.Progress<{ message?: string; increment?: number }>;
+  resolveProgress?: () => void;
+}
+
+function formatIssueSummary(count: number): string {
+  return count === 1 ? '1 issue found' : `${count} issues found`;
+}
+
+function formatDurationMs(durationMs: number): string {
+  const seconds = Math.max(1, Math.round(durationMs / 1000));
+  return `${seconds}s`;
+}
+
+function updateAnalysisStatusBar(): void {
+  if (!analysisStatusBarItem) {
+    return;
+  }
+
+  const runningCount = analysisStatesByUri.size;
+  if (runningCount === 0) {
+    analysisStatusBarItem.hide();
+    return;
+  }
+
+  const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
+  const activeState = activeUri ? analysisStatesByUri.get(activeUri) : undefined;
+  const fallbackState = activeState ?? analysisStatesByUri.values().next().value as AnalysisState;
+  const scope = runningCount > 1 ? ` (${runningCount} files)` : '';
+
+  analysisStatusBarItem.text = `$(sync~spin) Analyze: ${fallbackState.stage}${scope}`;
+  analysisStatusBarItem.tooltip = 'Chat Customizations Evaluations analysis in progress';
+  analysisStatusBarItem.show();
+}
+
+function updateProgressNotificationMessage(uri: string): void {
+  const state = analysisStatesByUri.get(uri);
+  if (!state?.progressReporter) {
+    return;
+  }
+
+  state.progressReporter.report({ message: state.stage });
+}
+
+function startProgressNotification(uri: string): void {
+  const state = analysisStatesByUri.get(uri);
+  if (!state) {
+    return;
+  }
+
+  void vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Running prompt analysis',
+      cancellable: false,
+    },
+    async (progress) => {
+      const currentState = analysisStatesByUri.get(uri);
+      if (!currentState) {
+        return;
+      }
+
+      currentState.progressReporter = progress;
+      progress.report({ message: currentState.stage });
+
+      await new Promise<void>((resolve) => {
+        currentState.resolveProgress = resolve;
+      });
+    }
+  );
+}
+
+function beginAnalysis(uri: string): void {
+  const existingState = analysisStatesByUri.get(uri);
+  if (existingState?.resolveProgress) {
+    existingState.resolveProgress();
+  }
+
+  pendingAnalysisUris.add(uri);
+  analysisStatesByUri.set(uri, {
+    startedAt: Date.now(),
+    stage: 'Starting analysis...',
+    llmRequestsInFlight: 0,
+  });
+  startProgressNotification(uri);
+  updateAnalysisStatusBar();
+}
+
+function markAnalysisStage(stage: string): void {
+  if (analysisStatesByUri.size === 0) {
+    return;
+  }
+
+  for (const [uri, state] of analysisStatesByUri.entries()) {
+    state.stage = stage;
+    updateProgressNotificationMessage(uri);
+  }
+  updateAnalysisStatusBar();
+}
+
+function markAnalysisStageWithRequestCount(stage: string): void {
+  if (analysisStatesByUri.size === 0) {
+    return;
+  }
+
+  for (const [uri, state] of analysisStatesByUri.entries()) {
+    const requestScope = state.llmRequestsInFlight > 1
+      ? ` (${state.llmRequestsInFlight} requests in flight)`
+      : '';
+    state.stage = `${stage}${requestScope}`;
+    updateProgressNotificationMessage(uri);
+  }
+  updateAnalysisStatusBar();
+}
+
+function markLLMRequestStart(): void {
+  if (analysisStatesByUri.size === 0) {
+    return;
+  }
+
+  for (const [uri, state] of analysisStatesByUri.entries()) {
+    state.llmRequestsInFlight += 1;
+    const requestCount = state.llmRequestsInFlight;
+    state.stage = requestCount > 1
+      ? `Connecting to Copilot... (${requestCount} requests in flight)`
+      : 'Connecting to Copilot...';
+    updateProgressNotificationMessage(uri);
+  }
+  updateAnalysisStatusBar();
+}
+
+function markLLMRequestDone(): void {
+  if (analysisStatesByUri.size === 0) {
+    return;
+  }
+
+  for (const [uri, state] of analysisStatesByUri.entries()) {
+    state.llmRequestsInFlight = Math.max(0, state.llmRequestsInFlight - 1);
+    state.stage = state.llmRequestsInFlight > 0
+      ? 'Waiting for Copilot responses...'
+      : 'Finalizing diagnostics...';
+    updateProgressNotificationMessage(uri);
+  }
+  updateAnalysisStatusBar();
+}
+
+function markDiagnosticsFound(uri: vscode.Uri, count: number): void {
+  const uriKey = uri.toString();
+  const state = analysisStatesByUri.get(uriKey);
+  if (!state) {
+    return;
+  }
+
+  state.stage = `Collecting results: ${formatIssueSummary(count)}`;
+  updateProgressNotificationMessage(uriKey);
+  updateAnalysisStatusBar();
+}
+
+async function completeAnalysis(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): Promise<void> {
+  const uriKey = uri.toString();
+  const state = analysisStatesByUri.get(uriKey);
+  if (state?.resolveProgress) {
+    state.resolveProgress();
+  }
+  pendingAnalysisUris.delete(uriKey);
+  analysisStatesByUri.delete(uriKey);
+  updateAnalysisStatusBar();
+
+  const durationText = state ? ` in ${formatDurationMs(Date.now() - state.startedAt)}` : '';
+  if (diagnostics.length === 0) {
+    void vscode.window.showInformationMessage(`Analysis complete${durationText}: no issues found.`);
+    return;
+  }
+
+  await notifyAndFocusProblems(uri, diagnostics, durationText);
+}
 const WAZA_USER_GUIDE_FALLBACK = `# Waza User Guide
 
 This guide explains how to use waza from the Chat Customizations Evaluations extension.
@@ -489,6 +671,13 @@ function getCustomizationUri(obj: unknown): vscode.Uri | undefined {
 export function activate(context: vscode.ExtensionContext) {
   extensionContext = context;
   outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
+  analysisStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+  analysisStatusBarItem.name = 'Chat Customizations Evaluations Analysis Status';
+  context.subscriptions.push(analysisStatusBarItem);
+
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
+    updateAnalysisStatusBar();
+  }));
 
   outputChannel.appendLine(`[Activation] Extension path: ${context.extensionPath}`);
 
@@ -541,14 +730,19 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register the LLM proxy handler — the server will send requests here
   client.onRequest(LLMRequestType, async (request: LLMProxyRequest): Promise<LLMProxyResponse> => {
+    markLLMRequestStart();
     outputChannel.appendLine('[LLM Proxy] Received request from server');
-    const result = await handleLLMProxyRequest(request);
-    if (result.error) {
-      outputChannel.appendLine(`[LLM Proxy] Error: ${result.error}`);
-    } else {
-      outputChannel.appendLine(`[LLM Proxy] Success (${result.text.length} chars)`);
+    try {
+      const result = await handleLLMProxyRequest(request);
+      if (result.error) {
+        outputChannel.appendLine(`[LLM Proxy] Error: ${result.error}`);
+      } else {
+        outputChannel.appendLine(`[LLM Proxy] Success (${result.text.length} chars)`);
+      }
+      return result;
+    } finally {
+      markLLMRequestDone();
     }
-    return result;
   });
 
   // Register commands
@@ -561,10 +755,10 @@ export function activate(context: vscode.ExtensionContext) {
           customDiagnostics: getCustomDiagnostics(),
         };
 
-        pendingAnalysisUris.add(editor.document.uri.toString());
+        beginAnalysis(editor.document.uri.toString());
+        markAnalysisStage('Submitting analysis request...');
         // Send notification to server to trigger full analysis
         client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
-        vscode.window.showInformationMessage('Running prompt analysis...');
       }
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async () => {
@@ -606,11 +800,11 @@ export function activate(context: vscode.ExtensionContext) {
         customDiagnostics: getCustomDiagnostics(),
       };
 
-      pendingAnalysisUris.add(uri.toString());
+      beginAnalysis(uri.toString());
+      markAnalysisStage('Submitting analysis request...');
       client.sendNotification('chatCustomizationsEvaluations/analyze', analyzeRequest);
       const document = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-      void vscode.window.showInformationMessage('Running prompt analysis...');
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaCreateEval', async (obj) => {
       const context = resolveSkillContext(obj);
@@ -737,10 +931,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (pendingAnalysisUris.has(uri.toString())) {
-          pendingAnalysisUris.delete(uri.toString());
-          if (diagnostics.length > 0) {
-            notifyAndFocusProblems(uri, diagnostics);
-          }
+          markDiagnosticsFound(uri, diagnostics.length);
+          void completeAnalysis(uri, diagnostics);
         }
       }
       // Update context key based on the active editor
@@ -785,8 +977,8 @@ function getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
   );
 }
 
-async function notifyAndFocusProblems(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): Promise<void> {
-  void vscode.window.showInformationMessage(`${diagnostics.length} diagnostics found`);
+async function notifyAndFocusProblems(uri: vscode.Uri, diagnostics: vscode.Diagnostic[], durationSuffix = ''): Promise<void> {
+  void vscode.window.showInformationMessage(`Analysis complete${durationSuffix}: ${formatIssueSummary(diagnostics.length)}.`);
 
   await vscode.commands.executeCommand('workbench.actions.view.problems');
   await vscode.commands.executeCommand('workbench.action.problems.focus');
@@ -1560,26 +1752,31 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
     return undefined;
   }
 
+  markAnalysisStageWithRequestCount('Discovering Copilot models (gpt-4o)...');
   outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
 
   let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
   outputChannel.appendLine(`[LLM Proxy] gpt-4o models found: ${models.length}`);
 
   if (models.length === 0) {
+    markAnalysisStageWithRequestCount('No gpt-4o model found, trying any Copilot model...');
     models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
     outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
   }
 
   if (models.length === 0) {
+    markAnalysisStageWithRequestCount('No Copilot-only match, trying all available models...');
     models = await vscode.lm.selectChatModels();
     outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
   }
 
   if (models.length === 0) {
+    markAnalysisStageWithRequestCount('No model available.');
     return undefined;
   }
 
   cachedModel = models[0];
+  markAnalysisStageWithRequestCount(`Using model: ${cachedModel.name}`);
   outputChannel.appendLine(`[LLM Proxy] Using model: ${cachedModel.name} (${cachedModel.vendor}/${cachedModel.family})`);
   return cachedModel;
 }
@@ -1592,6 +1789,7 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
   const cts = new vscode.CancellationTokenSource();
   const timeout = setTimeout(() => cts.cancel(), LLM_REQUEST_TIMEOUT_MS);
   try {
+    markAnalysisStageWithRequestCount('Preparing Copilot request payload...');
     const model = await selectModel();
 
     if (!model) {
@@ -1604,13 +1802,22 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
     ];
 
     // Send the request
+    markAnalysisStageWithRequestCount('Sending request to Copilot...');
     const response = await model.sendRequest(messages, {}, cts.token);
 
     // Collect the streamed response
+    markAnalysisStageWithRequestCount('Streaming Copilot response...');
     let text = '';
+    let chunkCount = 0;
     for await (const part of response.text) {
       text += part;
+      chunkCount += 1;
+      if (chunkCount <= 3 || chunkCount % 10 === 0) {
+        markAnalysisStageWithRequestCount(`Streaming Copilot response (chunk ${chunkCount})...`);
+      }
     }
+
+    markAnalysisStageWithRequestCount('Processing Copilot response...');
 
     return { text };
   } catch (error) {
