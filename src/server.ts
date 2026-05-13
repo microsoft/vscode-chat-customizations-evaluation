@@ -62,16 +62,18 @@ connection.onInitialized(() => {
 async function runFullAnalysis(
   textDocument: TextDocument,
   customDiagnostics?: CustomDiagnosticConfig[],
-): Promise<void> {
+): Promise<{ duration: number; resultCount: number }> {
   const uri = textDocument.uri;
 
+  const startTime = Date.now();
   const llmResults = await llmAnalyzer.analyze(textDocument, customDiagnostics);
 
   const diagnostics = resultsToDiagnostics(llmResults);
-  connection.sendDiagnostics({ uri, diagnostics });
+  await connection.sendDiagnostics({ uri, diagnostics });
   // Allow one stale-content notification on the next edit after analysis completes.
   staleNotificationEligibleUris.add(uri);
   connection.console.log(`[Analysis] Sent ${diagnostics.length} diagnostics for ${uri}`);
+  return { duration: Date.now() - startTime, resultCount: diagnostics.length };
 }
 
 export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
@@ -114,15 +116,16 @@ documents.onDidChangeContent((change) => {
   });
 });
 
-connection.onNotification('chatCustomizationsEvaluations/analyze', (params: {
+connection.onRequest('chatCustomizationsEvaluations/analyze', (params: {
   uri: string;
   customDiagnostics?: CustomDiagnosticConfig[];
 }) => {
   const document = documents.get(params.uri);
   connection.console.log(`[Analysis] Received analyze request for ${params.uri}`);
   if (document) {
-    runFullAnalysis(document, params.customDiagnostics);
+    return runFullAnalysis(document, params.customDiagnostics);
   }
+  return { duration: 0, resultCount: 0 };
 });
 
 documents.listen(connection);
