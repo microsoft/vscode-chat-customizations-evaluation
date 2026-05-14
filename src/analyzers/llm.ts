@@ -20,13 +20,57 @@ export class LLMAnalyzer {
   private static readonly MAX_COMPOSED_SIZE = 100_000;
 
   /**
-   * Extract JSON from an LLM response that may be wrapped in markdown code fences.
+   * Extract JSON from an LLM response that may be wrapped in markdown code fences
+   * or contain leading/trailing non-JSON text.
    */
   private extractJSON<T>(text: string): T {
     // Strip markdown code fences: ```json ... ``` or ``` ... ```
     const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    const jsonStr = fenceMatch ? fenceMatch[1].trim() : text.trim();
+    const raw = fenceMatch ? fenceMatch[1].trim() : text.trim();
+    // Slice from first { to last } to tolerate leading/trailing prose
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    const jsonStr = start !== -1 && end > start ? raw.slice(start, end + 1) : raw;
     return JSON.parse(jsonStr) as T;
+  }
+
+  private formatError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    try { return JSON.stringify(error); } catch { return 'Unknown error'; }
+  }
+
+  /**
+   * Create a user-visible diagnostic for LLM analysis errors (network/auth failures).
+   */
+  private makeLLMErrorDiagnostic(error: unknown, phase?: string): AnalysisResult {
+    const phaseLabel = phase ? ` [${phase}]` : '';
+    return {
+      code: 'llm-error',
+      message: `LLM analysis failed${phaseLabel}: ${this.formatError(error)}`,
+      severity: 'warning',
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+      },
+      analyzer: 'llm-analyzer',
+    };
+  }
+
+  /**
+   * Create a user-visible diagnostic when LLM response JSON cannot be parsed.
+   */
+  private makeParseErrorDiagnostic(error: unknown): AnalysisResult {
+    return {
+      code: 'llm-parse-error',
+      message: `Analysis ran but couldn't parse results — try again. (${error instanceof Error ? error.message : 'JSON parse error'})`,
+      severity: 'info',
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+      },
+      analyzer: 'llm-analyzer',
+    };
   }
 
   /**
@@ -62,27 +106,22 @@ export class LLMAnalyzer {
 
     try {
       // Run combined analysis + composition conflicts in parallel
-      const settled = await Promise.allSettled([
-        this.analyzeCombined(doc, customDiagnostics),
-        this.analyzeCompositionConflicts(doc),
-      ]);
+      const phases = [
+        { name: 'combined', promise: this.analyzeCombined(doc, customDiagnostics) },
+        { name: 'composition-conflicts', promise: this.analyzeCompositionConflicts(doc) },
+      ] as const;
+      const settled = await Promise.allSettled(phases.map(p => p.promise));
 
-      for (const result of settled) {
+      for (let i = 0; i < settled.length; i++) {
+        const result = settled[i];
         if (result.status === 'fulfilled') {
           results.push(...result.value);
+        } else {
+          results.push(this.makeLLMErrorDiagnostic(result.reason, phases[i].name));
         }
       }
     } catch (error) {
-      results.push({
-        code: 'llm-error',
-        message: `LLM analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        severity: 'info',
-        range: {
-          start: { line: 0, character: 0 },
-          end: { line: 0, character: 1 },
-        },
-        analyzer: 'llm-analyzer',
-      });
+      results.push(this.makeLLMErrorDiagnostic(error));
     }
 
     return results;
@@ -217,8 +256,8 @@ IMPORTANT:
       this.processCognitiveLoad(doc, parsed, results);
       this.processCoverage(doc, parsed, results);
       this.processCustomDiagnostics(doc, parsed, results);
-    } catch {
-      // JSON parse error, skip
+    } catch (error) {
+      results.push(this.makeParseErrorDiagnostic(error));
     }
 
     return results;
@@ -464,8 +503,8 @@ If no conflicts found, return {"conflicts": []}`;
           suggestion: conflict.suggestion,
         });
       }
-    } catch {
-      // JSON parse error, skip
+    } catch (error) {
+      results.push(this.makeParseErrorDiagnostic(error));
     }
 
     return results;

@@ -58,6 +58,21 @@ describe('LLMAnalyzer', () => {
       expect(result).toEqual({ ok: true });
     });
 
+    it('should handle JSON with leading preamble text', () => {
+      const result = extract('Here is the analysis:\n{"issues": []}');
+      expect(result).toEqual({ issues: [] });
+    });
+
+    it('should handle JSON with trailing text', () => {
+      const result = extract('{"issues": []}\nHope this helps!');
+      expect(result).toEqual({ issues: [] });
+    });
+
+    it('should handle JSON inside code fence with preamble text', () => {
+      const result = extract('```json\nHere is the analysis:\n{"issues": []}\n```');
+      expect(result).toEqual({ issues: [] });
+    });
+
     it('should handle nested objects', () => {
       const result = extract('{"a": {"b": [1, 2, 3]}}');
       expect(result).toEqual({ a: { b: [1, 2, 3] } });
@@ -156,8 +171,9 @@ describe('LLMAnalyzer', () => {
 
       const doc = makeDoc('Simple prompt.');
       const results = await analyzer.analyze(doc);
-      // Individual analyzers silently skip bad JSON
-      expect(Array.isArray(results)).toBe(true);
+      // Malformed JSON should surface as a user-visible parse error diagnostic
+      expect(results.some(r => r.code === 'llm-parse-error')).toBe(true);
+      expect(results.some(r => r.severity === 'info')).toBe(true);
     });
 
     it('should handle proxy errors gracefully', async () => {
@@ -166,7 +182,12 @@ describe('LLMAnalyzer', () => {
 
       const doc = makeDoc('Simple prompt.');
       const results = await analyzer.analyze(doc);
-      expect(Array.isArray(results)).toBe(true);
+      // Proxy errors surfaced via callLLM throw → allSettled rejection → warning diagnostic
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      expect(results.some(r => r.severity === 'warning')).toBe(true);
+      expect(results.some(r => r.message.includes('Model unavailable'))).toBe(true);
+      // Phase name should be included in the diagnostic message
+      expect(results.some(r => r.message.includes('[combined]'))).toBe(true);
     });
 
     it('should handle proxy rejection gracefully', async () => {
@@ -175,8 +196,9 @@ describe('LLMAnalyzer', () => {
 
       const doc = makeDoc('Simple prompt.');
       const results = await analyzer.analyze(doc);
-      // Should not throw unhandled
-      expect(Array.isArray(results)).toBe(true);
+      // Network errors surfaced as warning diagnostics
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      expect(results.some(r => r.message.includes('Network error'))).toBe(true);
     });
 
     it('should produce persona inconsistency results', async () => {
@@ -257,6 +279,37 @@ describe('LLMAnalyzer', () => {
       expect(customDiagnostics.length).toBeGreaterThan(0);
       expect(customDiagnostics[0].severity).toBe('warning');
       expect(customDiagnostics[0].range.start.line).toBe(0);
+    });
+
+    it('should show error diagnostic when one analysis phase rejects but still return other results', async () => {
+      // When the proxy errors, analyzeCombined rejects via allSettled.
+      // analyzeCompositionConflicts returns early (no linked files), so it fulfills with [].
+      // The error diagnostic from the rejected analyzeCombined phase should still appear.
+      const mockProxy = vi.fn().mockResolvedValue({ text: '{}', error: 'Copilot unavailable' });
+      analyzer.setProxyFn(mockProxy);
+
+      const doc = makeDoc('Be concise.\nProvide detailed explanations.');
+      const results = await analyzer.analyze(doc);
+
+      // The rejection from analyzeCombined should surface as a warning diagnostic with phase name
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      expect(results.some(r => r.message.includes('Copilot unavailable'))).toBe(true);
+      expect(results.some(r => r.message.includes('[combined]'))).toBe(true);
+      // Results should not throw — we still get a valid array
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should format non-Error object rejections without producing [object Object]', async () => {
+      const mockProxy = vi.fn().mockRejectedValue({ status: 403, detail: 'Forbidden' });
+      analyzer.setProxyFn(mockProxy);
+
+      const doc = makeDoc('Simple prompt.');
+      const results = await analyzer.analyze(doc);
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      // Should JSON.stringify the object, not produce [object Object]
+      const errorDiag = results.find(r => r.code === 'llm-error')!;
+      expect(errorDiag.message).not.toContain('[object Object]');
+      expect(errorDiag.message).toContain('403');
     });
   });
 });
