@@ -33,6 +33,8 @@ let statusBarCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 const STATUS_BAR_COMPLETION_DURATION_MS = 5000;
 const ACTION_SHOW_PROBLEMS = 'Show Problems';
 const ACTION_FIX_DIAGNOSTICS = 'Fix Diagnostics';
+const TELEMETRY_ENDPOINT_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_ENDPOINT';
+const TELEMETRY_AUTH_TOKEN_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_AUTH_TOKEN';
 
 interface AnalysisState {
   startedAt: number;
@@ -623,6 +625,88 @@ let outputChannel: vscode.OutputChannel;
 let cachedModel: vscode.LanguageModelChat | undefined;
 let modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
 let extensionContext: vscode.ExtensionContext;
+let telemetryLogger: vscode.TelemetryLogger | undefined;
+type TelemetryData = Record<string, string | number | boolean | undefined>;
+
+class ExtensionTelemetrySender implements vscode.TelemetrySender {
+  constructor(
+    private readonly endpoint: string | undefined,
+    private readonly authToken: string | undefined,
+    private readonly extensionVersion: string,
+  ) {}
+
+  sendEventData(eventName: string, data?: Record<string, unknown>): void {
+    this.postPayload('usage', eventName, data);
+  }
+
+  sendErrorData(error: Error, data?: Record<string, unknown>): void {
+    this.postPayload('error', 'extension/error', {
+      ...data,
+      errorName: error.name,
+      errorMessage: error.message,
+    });
+  }
+
+  private postPayload(kind: 'usage' | 'error', eventName: string, data?: Record<string, unknown>): void {
+    if (!this.endpoint) {
+      return;
+    }
+
+    const body = JSON.stringify({
+      kind,
+      eventName,
+      extensionVersion: this.extensionVersion,
+      timestamp: new Date().toISOString(),
+      data,
+    });
+
+    const request = https.request(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {}),
+      },
+    }, (response) => {
+      response.resume();
+    });
+
+    request.on('error', (error) => {
+      outputChannel.appendLine(`[Telemetry] Failed to send telemetry: ${error.message}`);
+    });
+
+    request.write(body);
+    request.end();
+  }
+}
+
+function createExtensionTelemetryLogger(context: vscode.ExtensionContext): vscode.TelemetryLogger {
+  const endpoint = process.env[TELEMETRY_ENDPOINT_ENV];
+  const authToken = process.env[TELEMETRY_AUTH_TOKEN_ENV];
+  if (!endpoint) {
+    outputChannel.appendLine(
+      `[Telemetry] ${TELEMETRY_ENDPOINT_ENV} is not set; telemetry events will be collected by VS Code but not exported by this extension sender.`
+    );
+  }
+  const extensionVersion = String(context.extension.packageJSON.version ?? 'unknown');
+  const sender = new ExtensionTelemetrySender(endpoint, authToken, extensionVersion);
+  return vscode.env.createTelemetryLogger(sender, {
+    additionalCommonProperties: {
+      extensionVersion,
+    },
+  });
+}
+
+function logTelemetryUsage(eventName: string, data?: TelemetryData): void {
+  telemetryLogger?.logUsage(eventName, data);
+}
+
+function logTelemetryError(eventName: string, error: unknown, data?: TelemetryData): void {
+  telemetryLogger?.logError(eventName, {
+    ...data,
+    errorMessage: error instanceof Error ? error.message : String(error),
+  });
+}
 
 function isUriLike(value: unknown): value is vscode.Uri {
   if (!value || typeof value !== 'object') {
@@ -706,9 +790,14 @@ function getCustomizationUri(obj: unknown): vscode.Uri | undefined {
 export function activate(context: vscode.ExtensionContext) {
   extensionContext = context;
   outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
+  telemetryLogger = createExtensionTelemetryLogger(context);
+  context.subscriptions.push(telemetryLogger);
   analysisStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
   analysisStatusBarItem.name = 'Chat Customizations Evaluations Analysis Status';
   context.subscriptions.push(analysisStatusBarItem);
+  logTelemetryUsage('extension/activate', {
+    workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
+  });
 
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
     updateAnalysisStatusBar();
@@ -765,6 +854,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Show a popup dialog when the server notifies content is stale
   client.onNotification('chatCustomizationsEvaluations/contentStale', (_params: { uri: string }) => {
+    logTelemetryUsage('analysis/contentStaleNotificationShown');
     void vscode.window.showInformationMessage('Content is stale. Run Analyze to update diagnostics.');
   });
 
@@ -788,9 +878,16 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async () => {
+      logTelemetryUsage('command/analyzePrompt', { source: 'activeEditor' });
       const editor = vscode.window.activeTextEditor;
-      if (!editor) return;
-      if (pendingAnalysisUris.has(editor.document.uri.toString())) return;
+      if (!editor) {
+        logTelemetryUsage('command/analyzePrompt/result', { outcome: 'noActiveEditor' });
+        return;
+      }
+      if (pendingAnalysisUris.has(editor.document.uri.toString())) {
+        logTelemetryUsage('command/analyzePrompt/result', { outcome: 'alreadyRunning' });
+        return;
+      }
 
       const analyzeRequest: AnalyzeRequest = {
         uri: editor.document.uri.toString(),
@@ -799,13 +896,26 @@ export function activate(context: vscode.ExtensionContext) {
 
       beginAnalysis(editor.document.uri.toString());
       markAnalysisStage('Submitting analysis request...');
-      // Send request to server to trigger full analysis
-      const result = client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      await completeAnalysis(editor.document.uri, await result);
+      try {
+        // Send request to server to trigger full analysis
+        const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+        logTelemetryUsage('command/analyzePrompt/result', {
+          outcome: 'success',
+          resultCount: result.resultCount,
+          durationMs: result.duration,
+          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+        });
+        await completeAnalysis(editor.document.uri, result);
+      } catch (error) {
+        logTelemetryError('command/analyzePrompt/result', error, { outcome: 'failed' });
+        void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
+      }
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async () => {
+      logTelemetryUsage('command/fixDiagnostics');
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
+        logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noActiveEditor' });
         return;
       }
 
@@ -818,21 +928,26 @@ export function activate(context: vscode.ExtensionContext) {
 
       const hasImprovements = await waitForDocumentImprovements(targetUri, initialText, FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS);
       if (!hasImprovements) {
+        logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noChangesDetected' });
         return;
       }
 
       const skillContext = resolveSkillContext({ uri: targetUri });
       if (!skillContext) {
+        logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noSkillContext' });
         return;
       }
 
       await handlePostFixDiagnosticsFlow(skillContext);
+      logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'success' });
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
+      logTelemetryUsage('command/analyzePromptFromCustomization');
       outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
       const uri = getCustomizationUri(obj);
       if (!uri) {
         outputChannel.appendLine('[Analyze Prompt From Customization] Missing URI in command arguments');
+        logTelemetryUsage('command/analyzePromptFromCustomization/result', { outcome: 'missingUri' });
         void vscode.window.showWarningMessage('Unable to analyze prompt: no URI was provided by the customization item.');
         return;
       }
@@ -844,39 +959,57 @@ export function activate(context: vscode.ExtensionContext) {
 
       beginAnalysis(uri.toString());
       markAnalysisStage('Submitting analysis request...');
-      const result = client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      const document = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-      
-      await completeAnalysis(uri, await result);
+      try {
+        const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+        const document = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
 
-      // Update context key based on the active editor
-      updateHasDiagnosticsContext();
+        await completeAnalysis(uri, result);
+        logTelemetryUsage('command/analyzePromptFromCustomization/result', {
+          outcome: 'success',
+          resultCount: result.resultCount,
+          durationMs: result.duration,
+          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+        });
+
+        // Update context key based on the active editor
+        updateHasDiagnosticsContext();
+      } catch (error) {
+        logTelemetryError('command/analyzePromptFromCustomization/result', error, { outcome: 'failed' });
+        void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
+      }
 
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaCreateEval', async (obj) => {
+      logTelemetryUsage('command/wazaCreateEval');
       const context = resolveSkillContext(obj);
       if (!context) {
+        logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'noSkillContext' });
         void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to create an eval scaffold.');
         return;
       }
 
       const scaffold = await createWazaEvalScaffold(context);
       if (!scaffold) {
+        logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'failed' });
         return;
       }
 
+      logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'success' });
       void vscode.window.showInformationMessage(`Created waza eval scaffold for ${context.skillName}.`);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEval', async (obj) => {
+      logTelemetryUsage('command/wazaRunEval');
       const context = resolveSkillContext(obj);
       if (!context) {
+        logTelemetryUsage('command/wazaRunEval/result', { outcome: 'noSkillContext' });
         void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to run waza evaluation.');
         return;
       }
 
       const evalPath = findEvalPath(context);
       if (!evalPath) {
+        logTelemetryUsage('command/wazaRunEval/result', { outcome: 'missingEval' });
         const action = await vscode.window.showWarningMessage(
           `No eval.yaml found for ${context.skillName}.`,
           'Create Eval'
@@ -891,6 +1024,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runWazaEvaluationForContext(context, evalPath);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEvalFromFile', async () => {
+      logTelemetryUsage('command/wazaRunEvalFromFile');
       const editor = vscode.window.activeTextEditor;
       outputChannel.appendLine(`[Waza] wazaRunEvalFromFile called`);
       outputChannel.appendLine(`[Waza] Editor: ${editor ? 'exists' : 'null'}`);
@@ -900,6 +1034,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       if (!editor || !editor.document.fileName.endsWith('eval.yaml')) {
+        logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'invalidActiveFile' });
         void vscode.window.showWarningMessage('This command requires an eval.yaml file to be active.');
         return;
       }
@@ -913,6 +1048,7 @@ export function activate(context: vscode.ExtensionContext) {
       const skillFilePath = findSkillFilePathFromEvalDir(evalDir);
       if (!skillFilePath) {
         outputChannel.appendLine(`[Waza] Could not find SKILL.md`);
+        logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'missingSkillFile' });
         void vscode.window.showWarningMessage('Could not find SKILL.md associated with this eval.yaml file.');
         return;
       }
@@ -933,6 +1069,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runWazaEvaluationForContext(context, evalUri.fsPath);
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaDownloadBinary', async () => {
+      logTelemetryUsage('command/wazaDownloadBinary');
       try {
         outputChannel.show(true);
         outputChannel.appendLine('[Waza] Downloading latest waza binary...');
@@ -942,14 +1079,17 @@ export function activate(context: vscode.ExtensionContext) {
         await configuration.update('waza.command', installPath, vscode.ConfigurationTarget.Global);
 
         outputChannel.appendLine(`[Waza] Installed to ${installPath}`);
+        logTelemetryUsage('command/wazaDownloadBinary/result', { outcome: 'success' });
         void vscode.window.showInformationMessage(`waza binary downloaded and configured: ${installPath}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         outputChannel.appendLine(`[Waza] Download failed: ${message}`);
+        logTelemetryError('command/wazaDownloadBinary/result', error, { outcome: 'failed' });
         void vscode.window.showErrorMessage(`Failed to download waza binary: ${message}`);
       }
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.openWazaUserGuide', async () => {
+      logTelemetryUsage('command/openWazaUserGuide');
       const guidePath = extensionContext.asAbsolutePath(path.join('docs', 'WAZA-USER-GUIDE.md'));
       let document: vscode.TextDocument;
 
@@ -1004,8 +1144,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Start the client
   client.start().then(() => {
     outputChannel.appendLine('[Activation] Language server started successfully');
+    logTelemetryUsage('extension/languageServerStart', { outcome: 'success' });
   }).catch((err: Error) => {
     outputChannel.appendLine(`[Activation] Language server failed to start: ${err.message}`);
+    logTelemetryError('extension/languageServerStart', err, { outcome: 'failed' });
     outputChannel.show(true);
   });
 
@@ -1054,6 +1196,7 @@ async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, file
 async function runWazaEvaluationForContext(context: SkillContext, evalPath: string): Promise<void> {
   outputChannel.show(true);
   outputChannel.appendLine(`[Waza] Running evaluation for ${context.skillName}`);
+  logTelemetryUsage('waza/runEval/start');
 
   // Create a results directory for this evaluation
   const resultsDir = path.join(extensionContext.globalStorageUri.fsPath, 'results');
@@ -1077,6 +1220,7 @@ async function runWazaEvaluationForContext(context: SkillContext, evalPath: stri
   }
 
   if (result.exitCode !== 0) {
+    logTelemetryUsage('waza/runEval/result', { outcome: 'failed' });
     void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
     return;
   }
@@ -1100,7 +1244,15 @@ async function runWazaEvaluationForContext(context: SkillContext, evalPath: stri
       const document = await vscode.workspace.openTextDocument(resultsUri);
       await vscode.window.showTextDocument(document, { preview: false });
     }
+    logTelemetryUsage('waza/runEval/result', {
+      outcome: 'success',
+      resultsFileCreated: true,
+    });
   } else {
+    logTelemetryUsage('waza/runEval/result', {
+      outcome: 'success',
+      resultsFileCreated: false,
+    });
     void vscode.window.showInformationMessage(`waza evaluation completed for ${context.skillName}.`);
   }
 }
@@ -1729,13 +1881,19 @@ async function createWazaEvalScaffold(context: SkillContext): Promise<EvalScaffo
   );
 
   let finalResult = result;
+  let usedTemporaryWorkspaceFallback = false;
   const resultText = `${result.stderr}\n${result.stdout}`;
   if (result.exitCode !== 0 && isWazaSkillLookupError(resultText)) {
     outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
     finalResult = await runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
+    usedTemporaryWorkspaceFallback = true;
   }
 
   if (finalResult.exitCode !== 0) {
+    logTelemetryUsage('waza/createEvalScaffold/result', {
+      outcome: 'failed',
+      usedTemporaryWorkspaceFallback,
+    });
     outputChannel.appendLine(`[Waza] eval scaffold failed\n${finalResult.stderr || finalResult.stdout}`);
     void vscode.window.showErrorMessage('Failed to create waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
     return undefined;
@@ -1745,10 +1903,19 @@ async function createWazaEvalScaffold(context: SkillContext): Promise<EvalScaffo
 
   const evalPath = findEvalPath(context);
   if (!evalPath) {
+    logTelemetryUsage('waza/createEvalScaffold/result', {
+      outcome: 'missingEvalAfterSuccess',
+      usedTemporaryWorkspaceFallback,
+    });
     return undefined;
   }
 
   const createdFiles = collectEvalScaffoldFiles(evalPath);
+  logTelemetryUsage('waza/createEvalScaffold/result', {
+    outcome: 'success',
+    usedTemporaryWorkspaceFallback,
+    createdFileCount: createdFiles.length,
+  });
   return { evalPath, createdFiles };
 }
 
@@ -1885,6 +2052,8 @@ export function deactivate(): Thenable<void> | undefined {
   if (statusBarCompletionTimer) {
     clearTimeout(statusBarCompletionTimer);
   }
+  logTelemetryUsage('extension/deactivate');
+  telemetryLogger?.dispose();
   if (!client) {
     return undefined;
   }

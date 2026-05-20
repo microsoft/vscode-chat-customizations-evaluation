@@ -61,6 +61,19 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 | `chatCustomizationsEvaluations.customDiagnostics` | `[]` | Array of custom diagnostic objects with `name` and `description` fields |
 | `chatCustomizationsEvaluations.waza.command` | `waza` | Command used to run waza (for example `/usr/local/bin/waza`) |
 
+### Telemetry
+
+The extension now emits usage telemetry events for activation, analysis commands, diagnostics fixes, and waza workflows.
+
+- Telemetry is gated by VS Code telemetry settings.
+- Events only include coarse metadata (for example counts, durations, and success/failure outcomes).
+- File contents, prompt text, and file paths are not sent in telemetry event payloads.
+
+To export telemetry to your own collector, set these environment variables before launching VS Code:
+
+- `CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_ENDPOINT`: HTTPS endpoint that accepts JSON POST payloads.
+- `CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_AUTH_TOKEN`: Optional bearer token added as the `Authorization` header.
+
 ## License
 
 MIT
