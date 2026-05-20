@@ -211,6 +211,46 @@ function markDiagnosticsFound(uri: vscode.Uri, count: number): void {
   updateAnalysisStatusBar();
 }
 
+const analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
+
+interface AnalysisSnapshot {
+  fingerprint: string;
+  resultCount: number;
+}
+
+function computeAnalysisFingerprint(document: vscode.TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
+  return createHash('sha256')
+    .update(document.getText())
+    .update('\0')
+    .update(JSON.stringify(customDiagnostics ?? []))
+    .digest('hex');
+}
+
+function recordAnalysisSnapshot(document: vscode.TextDocument, customDiagnostics: CustomDiagnosticConfig[] | undefined, resultCount: number): void {
+  analysisSnapshotsByUri.set(document.uri.toString(), {
+    fingerprint: computeAnalysisFingerprint(document, customDiagnostics),
+    resultCount,
+  });
+}
+
+async function getCurrentAnalysisSnapshot(uri: vscode.Uri, customDiagnostics?: CustomDiagnosticConfig[]): Promise<{
+  document: vscode.TextDocument;
+  diagnostics: vscode.Diagnostic[];
+  isFresh: boolean;
+  resultCount: number | undefined;
+}> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const cachedSnapshot = analysisSnapshotsByUri.get(uri.toString());
+  const isFresh = cachedSnapshot?.fingerprint === computeAnalysisFingerprint(document, customDiagnostics);
+
+  return {
+    document,
+    diagnostics: getExtensionDiagnostics(uri),
+    isFresh,
+    resultCount: cachedSnapshot?.resultCount,
+  };
+}
+
 async function completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
   const uriKey = uri.toString();
   const state = analysisStatesByUri.get(uriKey);
@@ -633,7 +673,7 @@ class ExtensionTelemetrySender implements vscode.TelemetrySender {
     private readonly endpoint: string | undefined,
     private readonly authToken: string | undefined,
     private readonly extensionVersion: string,
-  ) {}
+  ) { }
 
   sendEventData(eventName: string, data?: Record<string, unknown>): void {
     this.postPayload('usage', eventName, data);
@@ -894,11 +934,35 @@ export function activate(context: vscode.ExtensionContext) {
         customDiagnostics: getCustomDiagnostics(),
       };
 
+      // Check if analysis is already fresh and show a message instead of rerunning
+      const currentSnapshot = await getCurrentAnalysisSnapshot(editor.document.uri, analyzeRequest.customDiagnostics);
+      if (currentSnapshot.isFresh) {
+        if (currentSnapshot.diagnostics.length > 0) {
+          await focusExistingDiagnostics(editor.document.uri);
+          logTelemetryUsage('command/analyzePrompt/result', {
+            outcome: 'alreadyCurrentWithDiagnostics',
+            resultCount: currentSnapshot.diagnostics.length,
+            customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+          });
+          vscode.window.showInformationMessage('Analysis is already up to date.');
+          return;
+        }
+        await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
+        logTelemetryUsage('command/analyzePrompt/result', {
+          outcome: 'alreadyCurrentNoIssues',
+          resultCount: currentSnapshot.resultCount ?? 0,
+          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+        });
+        void vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
+        return;
+      }
+
       beginAnalysis(editor.document.uri.toString());
       markAnalysisStage('Submitting analysis request...');
       try {
         // Send request to server to trigger full analysis
         const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+        recordAnalysisSnapshot(editor.document, analyzeRequest.customDiagnostics, result.resultCount);
         logTelemetryUsage('command/analyzePrompt/result', {
           outcome: 'success',
           resultCount: result.resultCount,
@@ -957,12 +1021,34 @@ export function activate(context: vscode.ExtensionContext) {
         customDiagnostics: getCustomDiagnostics(),
       };
 
+      const currentSnapshot = await getCurrentAnalysisSnapshot(uri, analyzeRequest.customDiagnostics);
+      if (currentSnapshot.isFresh) {
+        if (currentSnapshot.diagnostics.length > 0) {
+          await focusExistingDiagnostics(uri);
+          logTelemetryUsage('command/analyzePromptFromCustomization/result', {
+            outcome: 'alreadyCurrentWithDiagnostics',
+            resultCount: currentSnapshot.diagnostics.length,
+            customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+          });
+          vscode.window.showInformationMessage('Analysis is already up to date.');
+          return;
+        }
+        await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
+        logTelemetryUsage('command/analyzePromptFromCustomization/result', {
+          outcome: 'alreadyCurrentNoIssues',
+          resultCount: currentSnapshot.resultCount ?? 0,
+          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+        });
+        vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
+        return;
+      }
+
       beginAnalysis(uri.toString());
       markAnalysisStage('Submitting analysis request...');
       try {
         const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-        const document = await vscode.workspace.openTextDocument(uri);
-        await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+        recordAnalysisSnapshot(currentSnapshot.document, analyzeRequest.customDiagnostics, result.resultCount);
+        await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
 
         await completeAnalysis(uri, result);
         logTelemetryUsage('command/analyzePromptFromCustomization/result', {
@@ -1191,6 +1277,28 @@ async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, file
 
   editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
   editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
+async function focusExistingDiagnostics(uri: vscode.Uri): Promise<boolean> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+  const firstDiagnostic = getExtensionDiagnostics(uri)
+    .slice()
+    .sort((a, b) => {
+      if (a.range.start.line !== b.range.start.line) {
+        return a.range.start.line - b.range.start.line;
+      }
+      return a.range.start.character - b.range.start.character;
+    })[0];
+
+  if (!firstDiagnostic) {
+    return false;
+  }
+
+  editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
+  editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  await vscode.commands.executeCommand('workbench.actions.view.problems');
+  return true;
 }
 
 async function runWazaEvaluationForContext(context: SkillContext, evalPath: string): Promise<void> {
