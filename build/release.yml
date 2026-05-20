@@ -1,0 +1,31 @@
+trigger:
+  branches:
+    include:
+      - main
+pr: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: microsoft/vscode-engineering
+      ref: main
+      endpoint: Monaco
+
+extends:
+  template: azure-pipelines/extension/stable.yml@templates
+  parameters:
+    l10nSourcePaths: ./src
+    buildSteps:
+      - script: npm i
+        displayName: Install Dependencies
+
+      - script: npm run bundle
+        displayName: Bundle for Production
+
+    tsa:
+      config:
+        areaPath: "Visual Studio Code Miscellaneous Extensions"
+      enabled: true
+
+    publishExtension: true
