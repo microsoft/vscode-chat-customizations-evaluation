@@ -244,7 +244,8 @@ IMPORTANT:
 - All "explanation", "problem", "description", and "suggestion" fields must be specific and actionable — never vague like "could be clearer" or "consider being more specific".
 - Suggestions must be concrete rewrites or additions, not abstract advice.
 - Use empty arrays [] for any category with no issues found.
-- If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).`;
+- If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
+- Do NOT analyze the frontmatter`;
 
     const response = await this.callLLM(prompt);
     const results: AnalysisResult[] = [];
