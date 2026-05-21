@@ -64,16 +64,28 @@ async function runFullAnalysis(
   customDiagnostics?: CustomDiagnosticConfig[],
 ): Promise<{ duration: number; resultCount: number }> {
   const uri = textDocument.uri;
+  const customDiagnosticsCount = customDiagnostics?.length ?? 0;
 
   const startTime = Date.now();
-  const llmResults = await llmAnalyzer.analyze(textDocument, customDiagnostics);
+  connection.console.log(
+    `[Analysis] Starting full analysis for ${uri} (customDiagnostics=${customDiagnosticsCount})`,
+  );
 
+  connection.console.log(`[Analysis] Running LLM analyzer for ${uri}`);
+  const llmResults = await llmAnalyzer.analyze(textDocument, customDiagnostics);
+  connection.console.log(`[Analysis] LLM analyzer completed for ${uri} with ${llmResults.length} results`);
+
+  connection.console.log(`[Analysis] Converting results to diagnostics for ${uri}`);
   const diagnostics = resultsToDiagnostics(llmResults);
+  connection.console.log(`[Analysis] Sending diagnostics for ${uri}`);
   await connection.sendDiagnostics({ uri, diagnostics });
   // Allow one stale-content notification on the next edit after analysis completes.
   staleNotificationEligibleUris.add(uri);
-  connection.console.log(`[Analysis] Sent ${diagnostics.length} diagnostics for ${uri}`);
-  return { duration: Date.now() - startTime, resultCount: diagnostics.length };
+  const duration = Date.now() - startTime;
+  connection.console.log(
+    `[Analysis] Completed full analysis for ${uri} in ${duration}ms with ${diagnostics.length} diagnostics`,
+  );
+  return { duration, resultCount: diagnostics.length };
 }
 
 export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
@@ -116,16 +128,39 @@ documents.onDidChangeContent((change) => {
   });
 });
 
-connection.onRequest('chatCustomizationsEvaluations/analyze', (params: {
+connection.onRequest('chatCustomizationsEvaluations/analyze', async (params: {
   uri: string;
   customDiagnostics?: CustomDiagnosticConfig[];
 }) => {
+  const customDiagnosticsCount = params.customDiagnostics?.length ?? 0;
   const document = documents.get(params.uri);
-  connection.console.log(`[Analysis] Received analyze request for ${params.uri}`);
-  if (document) {
-    return runFullAnalysis(document, params.customDiagnostics);
+
+  connection.console.log(
+    `[Analysis] Received analyze request for ${params.uri} (customDiagnostics=${customDiagnosticsCount})`,
+  );
+
+  if (!document) {
+    connection.console.warn(`[Analysis] No open document found for ${params.uri}; skipping analysis`);
+    return { duration: 0, resultCount: 0 };
   }
-  return { duration: 0, resultCount: 0 };
+
+  connection.console.log(`[Analysis] Found document for ${params.uri}; starting request analysis`);
+
+  try {
+    const result = await runFullAnalysis(document, params.customDiagnostics);
+    connection.console.log(
+      `[Analysis] Analyze request finished for ${params.uri} (duration=${result.duration}ms, diagnostics=${result.resultCount})`,
+    );
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    connection.console.error(`[Analysis] Analyze request failed for ${params.uri}: ${message}`);
+    if (stack) {
+      connection.console.error(`[Analysis] Stack for ${params.uri}: ${stack}`);
+    }
+    return { duration: 0, resultCount: 0 };
+  }
 });
 
 documents.listen(connection);
