@@ -985,8 +985,27 @@ export function activate(context: vscode.ExtensionContext) {
 
       const targetUri = editor.document.uri;
       const initialText = editor.document.getText();
+      const diagnostics = getExtensionDiagnostics(targetUri)
+        .slice()
+        .sort((a, b) => {
+          if (a.range.start.line !== b.range.start.line) {
+            return a.range.start.line - b.range.start.line;
+          }
+          return a.range.start.character - b.range.start.character;
+        });
+
+      if (diagnostics.length === 0) {
+        logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noDiagnostics' });
+        void vscode.window.showInformationMessage('No diagnostics found for the active file. Run Analyze first.');
+        return;
+      }
+
+      // Keep the target file focused so the chat skill has the correct file context.
+      await vscode.window.showTextDocument(editor.document, { preview: false, preserveFocus: false });
+
+      const query = buildFixDiagnosticsChatQuery(targetUri, diagnostics);
       await vscode.commands.executeCommand('workbench.action.chat.open', {
-        query: '/fix-customization-evaluation-diagnostics',
+        query,
         isPartialQuery: false,
       });
 
@@ -1003,7 +1022,10 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       await handlePostFixDiagnosticsFlow(skillContext);
-      logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'success' });
+      logTelemetryUsage('command/fixDiagnostics/result', {
+        outcome: 'success',
+        diagnosticsCount: diagnostics.length,
+      });
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
       logTelemetryUsage('command/analyzePromptFromCustomization');
@@ -1250,6 +1272,40 @@ function getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
   return vscode.languages.getDiagnostics(uri).filter(
     d => d.source?.startsWith('chat-customizations-evaluations')
   );
+}
+
+function diagnosticCodeToString(code: vscode.Diagnostic['code']): string {
+  if (code === undefined) {
+    return 'n/a';
+  }
+
+  if (typeof code === 'string' || typeof code === 'number') {
+    return String(code);
+  }
+
+  return String(code.value);
+}
+
+function buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): string {
+  const payload = diagnostics.map((diagnostic) => {
+    const startLine = diagnostic.range.start.line + 1;
+    const endLine = diagnostic.range.end.line + 1;
+    return [
+      `- line: ${startLine}${endLine !== startLine ? `-${endLine}` : ''}`,
+      `  code: ${diagnosticCodeToString(diagnostic.code)}`,
+      `  severity: ${vscode.DiagnosticSeverity[diagnostic.severity] ?? 'Unknown'}`,
+      `  message: ${diagnostic.message}`,
+      `  suggestion: ${typeof diagnostic.message === 'string' ? diagnostic.message : 'n/a'}`,
+    ].join('\n');
+  }).join('\n');
+
+  return [
+    '/fix-customization-evaluation-diagnostics',
+    `Target file: ${uri.fsPath}`,
+    'Use ONLY the diagnostics below for this target file. Do not lint or rewrite the skill file itself.',
+    'Diagnostics:',
+    payload,
+  ].join('\n\n');
 }
 
 async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, filename: string, durationSuffix = ''): Promise<void> {
