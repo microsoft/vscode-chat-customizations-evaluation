@@ -161,6 +161,12 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
 
     const prompt = `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
 
+Quality bar for findings:
+- Only report issues you are highly confident are real and materially harmful.
+- Do NOT report speculative, stylistic, or low-impact nits.
+- If evidence is weak or ambiguous, do not include that finding.
+- It is valid to return no issues in any or all categories when the prompt is already strong.
+
 Perform ALL of the following analyses:
 
 1. **Contradictions**: Find instructions that directly conflict with each other. Explain exactly WHY they conflict and what behavior the model would exhibit.
@@ -243,6 +249,8 @@ IMPORTANT:
 - All "instruction1", "instruction2", "text", and "relevant_text" fields MUST contain exact text copied from the prompt, so we can locate the issue precisely.
 - All "explanation", "problem", "description", and "suggestion" fields must be specific and actionable — never vague like "could be clearer" or "consider being more specific".
 - Suggestions must be concrete rewrites or additions, not abstract advice.
+- Prefer precision over recall: include fewer findings rather than uncertain ones.
+- Do not force findings to fill categories; empty arrays are expected when no high-confidence issue exists.
 - Use empty arrays [] for any category with no issues found.
 - If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
 - Do NOT analyze the frontmatter`;
