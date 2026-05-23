@@ -15,6 +15,9 @@ import {
   initializeWaza,
   registerWazaCommands,
 } from './waza';
+import {
+  selectPreferredModel,
+} from './modelSelection';
 
 interface LLMProxyRequest {
   prompt: string;
@@ -2080,20 +2083,14 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
     markAnalysisStageWithRequestCount(`User model not found, falling back to default selection...`);
   }
 
-  markAnalysisStageWithRequestCount('Discovering Copilot models (gpt-4o)...');
+  markAnalysisStageWithRequestCount('Discovering Copilot models (preferred families)...');
   outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
 
-  let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
-  outputChannel.appendLine(`[LLM Proxy] gpt-4o models found: ${models.length}`);
+  let models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+  outputChannel.appendLine(`[LLM Proxy] Copilot models found: ${models.length}`);
 
   if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No gpt-4o model found, trying any Copilot model...');
-    models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
-  }
-
-  if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No Copilot-only match, trying all available models...');
+    markAnalysisStageWithRequestCount('No Copilot model found, trying all available models...');
     models = await vscode.lm.selectChatModels();
     outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
   }
@@ -2103,7 +2100,13 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
     return undefined;
   }
 
-  cachedModel = models[0];
+  const selected = selectPreferredModel(models, msg => outputChannel.appendLine(msg));
+  if (!selected) {
+    markAnalysisStageWithRequestCount('No acceptable model available.');
+    return undefined;
+  }
+
+  cachedModel = selected;
   markAnalysisStageWithRequestCount(`Using model: ${cachedModel.name}`);
   outputChannel.appendLine(`[LLM Proxy] Using model: ${cachedModel.name} (${cachedModel.vendor}/${cachedModel.family})`);
   return cachedModel;
