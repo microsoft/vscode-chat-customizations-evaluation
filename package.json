@@ -152,6 +152,12 @@
         "title": "Open Waza User Guide",
         "category": "Chat Customizations Evaluations",
         "icon": "$(book)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.openAnalysisAndFixUserGuide",
+        "title": "Open Analysis and Fix User Guide",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(book)"
       }
     ],
     "menus": {

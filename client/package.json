@@ -78,6 +78,12 @@
         "title": "Analyze Prompt",
         "category": "Chat Customizations Evaluations",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "chatCustomizationsEvaluations.openAnalysisAndFixUserGuide",
+        "title": "Open Analysis and Fix User Guide",
+        "category": "Chat Customizations Evaluations",
+        "icon": "$(book)"
       }
     ],
     "menus": {
