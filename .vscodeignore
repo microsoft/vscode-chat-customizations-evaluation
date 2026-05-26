@@ -22,4 +22,6 @@ eslint.config.mjs
 CONTRIBUTING.md
 examples/**
 docs/**
+!docs/WAZA-USER-GUIDE.md
+!docs/ANALYSIS-AND-FIX-USER-GUIDE.md
 *.vsix

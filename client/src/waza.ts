@@ -417,6 +417,22 @@ function requireDeps(): WazaDependencies {
   return deps;
 }
 
+function resolveGuidePath(extensionContext: vscode.ExtensionContext, fileName: string): string | undefined {
+  const candidates = [
+    path.join('docs', fileName),
+    path.join('..', 'docs', fileName),
+  ];
+
+  for (const candidate of candidates) {
+    const absolutePath = extensionContext.asAbsolutePath(candidate);
+    if (fs.existsSync(absolutePath)) {
+      return absolutePath;
+    }
+  }
+
+  return undefined;
+}
+
 export function registerWazaCommands(context: vscode.ExtensionContext): vscode.Disposable[] {
   return [
     vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaCreateEval', async (obj) => {
@@ -533,10 +549,10 @@ export function registerWazaCommands(context: vscode.ExtensionContext): vscode.D
     vscode.commands.registerCommand('chatCustomizationsEvaluations.openWazaUserGuide', async () => {
       const { extensionContext, outputChannel, logTelemetryUsage } = requireDeps();
       logTelemetryUsage('command/openWazaUserGuide');
-      const guidePath = extensionContext.asAbsolutePath(path.join('docs', 'WAZA-USER-GUIDE.md'));
+      const guidePath = resolveGuidePath(extensionContext, 'WAZA-USER-GUIDE.md');
       let document: vscode.TextDocument;
 
-      if (fs.existsSync(guidePath)) {
+      if (guidePath) {
         const guideUri = vscode.Uri.file(guidePath);
         document = await vscode.workspace.openTextDocument(guideUri);
       } else {
@@ -552,10 +568,10 @@ export function registerWazaCommands(context: vscode.ExtensionContext): vscode.D
     vscode.commands.registerCommand('chatCustomizationsEvaluations.openAnalysisAndFixUserGuide', async () => {
       const { extensionContext, outputChannel, logTelemetryUsage } = requireDeps();
       logTelemetryUsage('command/openAnalysisAndFixUserGuide');
-      const guidePath = extensionContext.asAbsolutePath(path.join('docs', 'ANALYSIS-AND-FIX-USER-GUIDE.md'));
+      const guidePath = resolveGuidePath(extensionContext, 'ANALYSIS-AND-FIX-USER-GUIDE.md');
       let document: vscode.TextDocument;
 
-      if (fs.existsSync(guidePath)) {
+      if (guidePath) {
         const guideUri = vscode.Uri.file(guidePath);
         document = await vscode.workspace.openTextDocument(guideUri);
       } else {
