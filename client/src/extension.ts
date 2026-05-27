@@ -1475,14 +1475,14 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
     markAnalysisStageWithRequestCount(`User model not found, falling back to default selection...`);
   }
 
-  markAnalysisStageWithRequestCount('Discovering Copilot models (gpt-4o)...');
+  markAnalysisStageWithRequestCount('Discovering Copilot models (claude-sonnet-4.6)...');
   outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
 
-  let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
-  outputChannel.appendLine(`[LLM Proxy] gpt-4o models found: ${models.length}`);
+  let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'claude-sonnet-4.6' });
+  outputChannel.appendLine(`[LLM Proxy] claude-sonnet-4.6 models found: ${models.length}`);
 
   if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No gpt-4o model found, trying any Copilot model...');
+    markAnalysisStageWithRequestCount('No claude-sonnet-4.6 model found, trying any Copilot model...');
     models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
     outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
   }

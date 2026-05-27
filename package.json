@@ -69,8 +69,8 @@
         },
         "chatCustomizationsEvaluations.model": {
           "type": "string",
-          "default": "gpt-4o",
-          "description": "Model to use for analysis (for example: gpt-4o, gpt-4.1, gpt-4.1-mini). Defaults to gpt-4o."
+          "default": "claude-sonnet-4.6",
+          "description": "Model to use for analysis (for example: claude-sonnet-4.6, gpt-4o, gpt-4.1). Defaults to claude-sonnet-4.6."
         },
         "chatCustomizationsEvaluations.customDiagnostics": {
           "type": "array",
