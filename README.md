@@ -51,6 +51,12 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 | `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `eval.yaml` and task files for the active skill |
 | `Chat Customizations Evaluations: Run Waza Evaluation` | Run the skill's eval suite |
 | `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific waza binary and configure the extension to use it |
+| `Chat Customizations Evaluations: Open Analysis and Fix User Guide` | Open the analysis and fix workflow guide |
+
+### Guides
+
+- [Analysis and Fix User Guide](docs/ANALYSIS-AND-FIX-USER-GUIDE.md)
+- [Waza User Guide](docs/WAZA-USER-GUIDE.md)
 
 ### Configuration
 

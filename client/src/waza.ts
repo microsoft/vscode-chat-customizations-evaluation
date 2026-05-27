@@ -384,6 +384,27 @@ graders:
 - Results files are JSON and can be diffed or archived.
 `;
 
+const ANALYSIS_AND_FIX_USER_GUIDE_FALLBACK = `# Analysis and Fix User Guide
+
+This guide explains how analysis and diagnostics fixing work in Chat Customizations Evaluations.
+
+## Analyze
+
+- Run Chat Customizations Evaluations: Analyze from the command palette.
+- The extension runs LLM analysis and publishes diagnostics to the Problems panel.
+
+## Fix Diagnostics
+
+- Run Chat Customizations Evaluations: Fix Diagnostics.
+- The extension sends current diagnostics to the fix skill and applies targeted edits.
+
+## Full Guide
+
+The packaged guide file was not found, so this fallback is shown. In source check:
+
+- docs/ANALYSIS-AND-FIX-USER-GUIDE.md
+`;
+
 export function initializeWaza(wazaDeps: WazaDependencies): void {
   deps = wazaDeps;
 }
@@ -394,6 +415,22 @@ function requireDeps(): WazaDependencies {
   }
 
   return deps;
+}
+
+function resolveGuidePath(extensionContext: vscode.ExtensionContext, fileName: string): string | undefined {
+  const candidates = [
+    path.join('docs', fileName),
+    path.join('..', 'docs', fileName),
+  ];
+
+  for (const candidate of candidates) {
+    const absolutePath = extensionContext.asAbsolutePath(candidate);
+    if (fs.existsSync(absolutePath)) {
+      return absolutePath;
+    }
+  }
+
+  return undefined;
 }
 
 export function registerWazaCommands(context: vscode.ExtensionContext): vscode.Disposable[] {
@@ -512,16 +549,35 @@ export function registerWazaCommands(context: vscode.ExtensionContext): vscode.D
     vscode.commands.registerCommand('chatCustomizationsEvaluations.openWazaUserGuide', async () => {
       const { extensionContext, outputChannel, logTelemetryUsage } = requireDeps();
       logTelemetryUsage('command/openWazaUserGuide');
-      const guidePath = extensionContext.asAbsolutePath(path.join('docs', 'WAZA-USER-GUIDE.md'));
+      const guidePath = resolveGuidePath(extensionContext, 'WAZA-USER-GUIDE.md');
       let document: vscode.TextDocument;
 
-      if (fs.existsSync(guidePath)) {
+      if (guidePath) {
         const guideUri = vscode.Uri.file(guidePath);
         document = await vscode.workspace.openTextDocument(guideUri);
       } else {
         outputChannel.appendLine('[Waza] Guide file not found in extension package; opening built-in fallback guide.');
         document = await vscode.workspace.openTextDocument({
           content: WAZA_USER_GUIDE_FALLBACK,
+          language: 'markdown',
+        });
+      }
+
+      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+    }),
+    vscode.commands.registerCommand('chatCustomizationsEvaluations.openAnalysisAndFixUserGuide', async () => {
+      const { extensionContext, outputChannel, logTelemetryUsage } = requireDeps();
+      logTelemetryUsage('command/openAnalysisAndFixUserGuide');
+      const guidePath = resolveGuidePath(extensionContext, 'ANALYSIS-AND-FIX-USER-GUIDE.md');
+      let document: vscode.TextDocument;
+
+      if (guidePath) {
+        const guideUri = vscode.Uri.file(guidePath);
+        document = await vscode.workspace.openTextDocument(guideUri);
+      } else {
+        outputChannel.appendLine('[Docs] Analysis and fix guide file not found in extension package; opening built-in fallback guide.');
+        document = await vscode.workspace.openTextDocument({
+          content: ANALYSIS_AND_FIX_USER_GUIDE_FALLBACK,
           language: 'markdown',
         });
       }
