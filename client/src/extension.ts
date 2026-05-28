@@ -37,10 +37,12 @@ let statusBarCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 const STATUS_BAR_COMPLETION_DURATION_MS = 5000;
 const ACTION_SHOW_PROBLEMS = 'Show Problems';
 const ACTION_FIX_DIAGNOSTICS = 'Fix Diagnostics';
+const ACTION_ANALYZE_AGAIN = 'Analyze Again';
 const ACTION_INSTALL_WAZA_BINARY = 'Install Waza Binary';
 const ACTION_OPEN_WAZA_USER_GUIDE = 'Open Waza User Guide';
 const TELEMETRY_ENDPOINT_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_ENDPOINT';
 const TELEMETRY_AUTH_TOKEN_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_AUTH_TOKEN';
+const NON_FIXABLE_DIAGNOSTIC_CODES = new Set(['llm-error', 'llm-parse-error']);
 
 interface AnalysisState {
   startedAt: number;
@@ -668,10 +670,23 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      const fixableDiagnostics = diagnostics.filter(diagnostic => !isNonFixableDiagnostic(diagnostic));
+      if (fixableDiagnostics.length === 0) {
+        logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'nonFixableDiagnosticsOnly' });
+        const action = await vscode.window.showInformationMessage(
+          'Fix Diagnostics is unavailable for LLM analysis error diagnostics. Run Analyze again.',
+          ACTION_ANALYZE_AGAIN,
+        );
+        if (action === ACTION_ANALYZE_AGAIN) {
+          await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
+        }
+        return;
+      }
+
       // Keep the target file focused so the chat skill has the correct file context.
       await vscode.window.showTextDocument(editor.document, { preview: false, preserveFocus: false });
 
-      const query = buildFixDiagnosticsChatQuery(targetUri, diagnostics);
+      const query = buildFixDiagnosticsChatQuery(targetUri, fixableDiagnostics);
       await vscode.commands.executeCommand('workbench.action.chat.open', {
         query,
         isPartialQuery: false,
@@ -692,7 +707,7 @@ export function activate(context: vscode.ExtensionContext) {
       await handlePostFixDiagnosticsFlow(skillContext);
       logTelemetryUsage('command/fixDiagnostics/result', {
         outcome: 'success',
-        diagnosticsCount: diagnostics.length,
+        diagnosticsCount: fixableDiagnostics.length,
       });
     }),
     vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => {
@@ -829,6 +844,10 @@ function diagnosticCodeToString(code: vscode.Diagnostic['code']): string {
   return String(code.value);
 }
 
+function isNonFixableDiagnostic(diagnostic: vscode.Diagnostic): boolean {
+  return NON_FIXABLE_DIAGNOSTIC_CODES.has(diagnosticCodeToString(diagnostic.code));
+}
+
 function buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): string {
   const payload = diagnostics.map((diagnostic) => {
     const startLine = diagnostic.range.start.line + 1;
@@ -853,11 +872,25 @@ function buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagn
 
 async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, filename: string, durationSuffix = ''): Promise<void> {
   const message = `Analysis of ${filename} complete${durationSuffix}: ${formatIssueSummary(resultCount)}.`;
+  const diagnostics = getExtensionDiagnostics(uri)
+    .slice()
+    .sort((a, b) => {
+      if (a.range.start.line !== b.range.start.line) {
+        return a.range.start.line - b.range.start.line;
+      }
+      return a.range.start.character - b.range.start.character;
+    });
+  const hasNonFixableDiagnostics = diagnostics.some(diagnostic => isNonFixableDiagnostic(diagnostic));
 
   void (async () => {
-    const action = await vscode.window.showInformationMessage(message, ACTION_SHOW_PROBLEMS, ACTION_FIX_DIAGNOSTICS);
+    const actions = hasNonFixableDiagnostics
+      ? [ACTION_SHOW_PROBLEMS, ACTION_ANALYZE_AGAIN]
+      : [ACTION_SHOW_PROBLEMS, ACTION_FIX_DIAGNOSTICS];
+    const action = await vscode.window.showInformationMessage(message, ...actions);
     if (action === ACTION_SHOW_PROBLEMS) {
       await vscode.commands.executeCommand('workbench.actions.view.problems');
+    } else if (action === ACTION_ANALYZE_AGAIN) {
+      await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
     } else if (action === ACTION_FIX_DIAGNOSTICS) {
       await vscode.commands.executeCommand('chatCustomizationsEvaluations.fixDiagnostics');
     }
@@ -865,14 +898,11 @@ async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, file
 
   const document = await vscode.workspace.openTextDocument(uri);
   const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
-  const firstDiagnostic = getExtensionDiagnostics(uri)
-    .slice()
-    .sort((a, b) => {
-      if (a.range.start.line !== b.range.start.line) {
-        return a.range.start.line - b.range.start.line;
-      }
-      return a.range.start.character - b.range.start.character;
-    })[0];
+  const firstDiagnostic = diagnostics[0];
+
+  if (!firstDiagnostic) {
+    return;
+  }
 
   editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
   editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
