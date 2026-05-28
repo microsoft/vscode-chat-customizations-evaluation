@@ -15,312 +15,383 @@ import {
   initializeWaza,
   registerWazaCommands,
 } from './waza';
-
-interface LLMProxyRequest {
-  prompt: string;
-  systemPrompt: string;
-}
-
-interface LLMProxyResponse {
-  text: string;
-  error?: string;
-}
+import {
+  ACTION_ANALYZE_AGAIN,
+  ACTION_FIX_DIAGNOSTICS,
+  ACTION_INSTALL_WAZA_BINARY,
+  ACTION_OPEN_WAZA_USER_GUIDE,
+  ACTION_SHOW_PROBLEMS,
+  NON_FIXABLE_DIAGNOSTIC_CODES,
+  TELEMETRY_AUTH_TOKEN_ENV,
+  TELEMETRY_ENDPOINT_ENV,
+} from './strings';
+import type {
+  AnalysisSnapshot,
+  AnalysisState,
+  AnalyzeRequest,
+  CommandResult,
+  CustomDiagnosticConfig,
+  EvalScaffoldSummary,
+  LLMProxyRequest,
+  LLMProxyResponse,
+  SkillContext,
+  TelemetryData,
+} from './extensionTypes';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
-const urisWithDiagnostics = new Set<string>();
-const pendingAnalysisUris = new Set<string>();
-const analysisStatesByUri = new Map<string, AnalysisState>();
-let analysisStatusBarItem: vscode.StatusBarItem | undefined;
-let statusBarCompletionMessage: string | undefined;
-let statusBarCompletionTimer: ReturnType<typeof setTimeout> | undefined;
-
 const STATUS_BAR_COMPLETION_DURATION_MS = 5000;
-const ACTION_SHOW_PROBLEMS = 'Show Problems';
-const ACTION_FIX_DIAGNOSTICS = 'Fix Diagnostics';
-const ACTION_ANALYZE_AGAIN = 'Analyze Again';
-const ACTION_INSTALL_WAZA_BINARY = 'Install Waza Binary';
-const ACTION_OPEN_WAZA_USER_GUIDE = 'Open Waza User Guide';
-const TELEMETRY_ENDPOINT_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_ENDPOINT';
-const TELEMETRY_AUTH_TOKEN_ENV = 'CHAT_CUSTOMIZATIONS_EVALUATIONS_TELEMETRY_AUTH_TOKEN';
-const NON_FIXABLE_DIAGNOSTIC_CODES = new Set(['llm-error', 'llm-parse-error']);
+const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
 
-interface AnalysisState {
-  startedAt: number;
-  stage: string;
-  llmRequestsInFlight: number;
-  progressReporter?: vscode.Progress<{ message?: string; increment?: number }>;
-  resolveProgress?: () => void;
-}
+class AnalysisCoordinator {
+  private readonly urisWithDiagnostics = new Set<string>();
+  private readonly pendingAnalysisUris = new Set<string>();
+  private readonly analysisStatesByUri = new Map<string, AnalysisState>();
+  private readonly analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
+  private statusBarItem: vscode.StatusBarItem | undefined;
+  private statusBarCompletionMessage: string | undefined;
+  private statusBarCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 
-function formatIssueSummary(count: number): string {
-  return count === 1 ? '1 issue found' : `${count} issues found`;
-}
+  initialize(context: vscode.ExtensionContext): void {
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+    this.statusBarItem.name = 'Chat Customizations Evaluations Analysis Status';
+    context.subscriptions.push(this.statusBarItem);
 
-function formatDurationMs(durationMs: number): string {
-  const seconds = Math.max(1, Math.round(durationMs / 1000));
-  return `${seconds}s`;
-}
-
-function updateAnalysisStatusBar(): void {
-  if (!analysisStatusBarItem) {
-    return;
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
+      this.updateAnalysisStatusBar();
+      this.updateHasDiagnosticsContext();
+    }));
   }
 
-  const runningCount = analysisStatesByUri.size;
-  if (runningCount === 0) {
-    if (statusBarCompletionMessage) {
-      analysisStatusBarItem.text = statusBarCompletionMessage;
-      analysisStatusBarItem.command = 'workbench.actions.view.problems';
-      analysisStatusBarItem.tooltip = 'Click to open Problems panel';
-      analysisStatusBarItem.show();
-    } else {
-      analysisStatusBarItem.command = undefined;
-      analysisStatusBarItem.hide();
+  dispose(): void {
+    if (this.statusBarCompletionTimer) {
+      clearTimeout(this.statusBarCompletionTimer);
+      this.statusBarCompletionTimer = undefined;
     }
-    return;
   }
 
-  const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
-  const activeState = activeUri ? analysisStatesByUri.get(activeUri) : undefined;
-  const fallbackState = activeState ?? analysisStatesByUri.values().next().value as AnalysisState;
-  const scope = runningCount > 1 ? ` (${runningCount} files)` : '';
-
-  analysisStatusBarItem.text = `$(sync~spin) Analyze: ${fallbackState.stage}${scope}`;
-  analysisStatusBarItem.command = undefined;
-  analysisStatusBarItem.tooltip = 'Chat Customizations Evaluations analysis in progress';
-  analysisStatusBarItem.show();
-}
-
-function updateIsAnalyzingContext(): void {
-  void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', pendingAnalysisUris.size > 0);
-}
-
-function updateProgressNotificationMessage(uri: string): void {
-  const state = analysisStatesByUri.get(uri);
-  if (!state?.progressReporter) {
-    return;
+  isAnalysisPending(uri: vscode.Uri): boolean {
+    return this.pendingAnalysisUris.has(uri.toString());
   }
 
-  state.progressReporter.report({ message: state.stage });
-}
+  beginAnalysis(uri: string): void {
+    const existingState = this.analysisStatesByUri.get(uri);
+    if (existingState?.resolveProgress) {
+      existingState.resolveProgress();
+    }
 
-function startProgressNotification(uri: string): void {
-  const state = analysisStatesByUri.get(uri);
-  if (!state) {
-    return;
+    this.pendingAnalysisUris.add(uri);
+    this.analysisStatesByUri.set(uri, {
+      startedAt: Date.now(),
+      stage: 'Starting analysis...',
+      llmRequestsInFlight: 0,
+    });
+    this.updateIsAnalyzingContext();
+    this.startProgressNotification(uri);
+    this.updateAnalysisStatusBar();
   }
 
-  void vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Running prompt analysis',
-      cancellable: false,
-    },
-    async (progress) => {
-      const currentState = analysisStatesByUri.get(uri);
-      if (!currentState) {
-        return;
+  markAnalysisStage(stage: string): void {
+    if (this.analysisStatesByUri.size === 0) {
+      return;
+    }
+
+    for (const [uri, state] of this.analysisStatesByUri.entries()) {
+      state.stage = stage;
+      this.updateProgressNotificationMessage(uri);
+    }
+    this.updateAnalysisStatusBar();
+  }
+
+  markAnalysisStageWithRequestCount(stage: string): void {
+    if (this.analysisStatesByUri.size === 0) {
+      return;
+    }
+
+    for (const [uri, state] of this.analysisStatesByUri.entries()) {
+      const requestScope = state.llmRequestsInFlight > 1
+        ? ` (${state.llmRequestsInFlight} requests in flight)`
+        : '';
+      state.stage = `${stage}${requestScope}`;
+      this.updateProgressNotificationMessage(uri);
+    }
+    this.updateAnalysisStatusBar();
+  }
+
+  markLLMRequestStart(): void {
+    if (this.analysisStatesByUri.size === 0) {
+      return;
+    }
+
+    for (const [uri, state] of this.analysisStatesByUri.entries()) {
+      state.llmRequestsInFlight += 1;
+      const requestCount = state.llmRequestsInFlight;
+      state.stage = requestCount > 1
+        ? `Connecting to Copilot... (${requestCount} requests in flight)`
+        : 'Connecting to Copilot...';
+      this.updateProgressNotificationMessage(uri);
+    }
+    this.updateAnalysisStatusBar();
+  }
+
+  markLLMRequestDone(): void {
+    if (this.analysisStatesByUri.size === 0) {
+      return;
+    }
+
+    for (const [uri, state] of this.analysisStatesByUri.entries()) {
+      state.llmRequestsInFlight = Math.max(0, state.llmRequestsInFlight - 1);
+      state.stage = state.llmRequestsInFlight > 0
+        ? 'Waiting for Copilot responses...'
+        : 'Finalizing diagnostics...';
+      this.updateProgressNotificationMessage(uri);
+    }
+    this.updateAnalysisStatusBar();
+  }
+
+  handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
+    for (const uri of uris) {
+      const diagnostics = getExtensionDiagnostics(uri);
+      const uriKey = uri.toString();
+      if (diagnostics.length > 0) {
+        this.urisWithDiagnostics.add(uriKey);
+      } else {
+        this.urisWithDiagnostics.delete(uriKey);
       }
 
-      currentState.progressReporter = progress;
-      progress.report({ message: currentState.stage });
-
-      await new Promise<void>((resolve) => {
-        currentState.resolveProgress = resolve;
-      });
+      if (this.pendingAnalysisUris.has(uriKey)) {
+        this.markDiagnosticsFound(uri, diagnostics.length);
+      }
     }
-  );
-}
 
-function beginAnalysis(uri: string): void {
-  const existingState = analysisStatesByUri.get(uri);
-  if (existingState?.resolveProgress) {
-    existingState.resolveProgress();
+    this.updateHasDiagnosticsContext();
   }
 
-  pendingAnalysisUris.add(uri);
-  analysisStatesByUri.set(uri, {
-    startedAt: Date.now(),
-    stage: 'Starting analysis...',
-    llmRequestsInFlight: 0,
-  });
-  updateIsAnalyzingContext();
-  startProgressNotification(uri);
-  updateAnalysisStatusBar();
-}
+  async focusExistingDiagnostics(uri: vscode.Uri): Promise<boolean> {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+    const firstDiagnostic = getExtensionDiagnostics(uri)
+      .slice()
+      .sort((a, b) => {
+        if (a.range.start.line !== b.range.start.line) {
+          return a.range.start.line - b.range.start.line;
+        }
+        return a.range.start.character - b.range.start.character;
+      })[0];
 
-function markAnalysisStage(stage: string): void {
-  if (analysisStatesByUri.size === 0) {
-    return;
+    if (!firstDiagnostic) {
+      return false;
+    }
+
+    editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
+    editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    await vscode.commands.executeCommand('workbench.actions.view.problems');
+    return true;
   }
 
-  for (const [uri, state] of analysisStatesByUri.entries()) {
-    state.stage = stage;
-    updateProgressNotificationMessage(uri);
-  }
-  updateAnalysisStatusBar();
-}
-
-function markAnalysisStageWithRequestCount(stage: string): void {
-  if (analysisStatesByUri.size === 0) {
-    return;
+  recordAnalysisSnapshot(document: vscode.TextDocument, customDiagnostics: CustomDiagnosticConfig[] | undefined, resultCount: number): void {
+    this.analysisSnapshotsByUri.set(document.uri.toString(), {
+      fingerprint: this.computeAnalysisFingerprint(document, customDiagnostics),
+      resultCount,
+    });
   }
 
-  for (const [uri, state] of analysisStatesByUri.entries()) {
-    const requestScope = state.llmRequestsInFlight > 1
-      ? ` (${state.llmRequestsInFlight} requests in flight)`
-      : '';
-    state.stage = `${stage}${requestScope}`;
-    updateProgressNotificationMessage(uri);
-  }
-  updateAnalysisStatusBar();
-}
+  async getCurrentAnalysisSnapshot(uri: vscode.Uri, customDiagnostics?: CustomDiagnosticConfig[]): Promise<{
+    document: vscode.TextDocument;
+    diagnostics: vscode.Diagnostic[];
+    isFresh: boolean;
+    resultCount: number | undefined;
+  }> {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const cachedSnapshot = this.analysisSnapshotsByUri.get(uri.toString());
+    const isFresh = cachedSnapshot?.fingerprint === this.computeAnalysisFingerprint(document, customDiagnostics);
 
-function markLLMRequestStart(): void {
-  if (analysisStatesByUri.size === 0) {
-    return;
-  }
-
-  for (const [uri, state] of analysisStatesByUri.entries()) {
-    state.llmRequestsInFlight += 1;
-    const requestCount = state.llmRequestsInFlight;
-    state.stage = requestCount > 1
-      ? `Connecting to Copilot... (${requestCount} requests in flight)`
-      : 'Connecting to Copilot...';
-    updateProgressNotificationMessage(uri);
-  }
-  updateAnalysisStatusBar();
-}
-
-function markLLMRequestDone(): void {
-  if (analysisStatesByUri.size === 0) {
-    return;
+    return {
+      document,
+      diagnostics: getExtensionDiagnostics(uri),
+      isFresh,
+      resultCount: cachedSnapshot?.resultCount,
+    };
   }
 
-  for (const [uri, state] of analysisStatesByUri.entries()) {
-    state.llmRequestsInFlight = Math.max(0, state.llmRequestsInFlight - 1);
-    state.stage = state.llmRequestsInFlight > 0
-      ? 'Waiting for Copilot responses...'
-      : 'Finalizing diagnostics...';
-    updateProgressNotificationMessage(uri);
-  }
-  updateAnalysisStatusBar();
-}
+  async completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
+    const uriKey = uri.toString();
+    const state = this.analysisStatesByUri.get(uriKey);
+    if (state?.resolveProgress) {
+      state.resolveProgress();
+    }
+    this.pendingAnalysisUris.delete(uriKey);
+    this.analysisStatesByUri.delete(uriKey);
+    this.updateIsAnalyzingContext();
 
-function markDiagnosticsFound(uri: vscode.Uri, count: number): void {
-  const uriKey = uri.toString();
-  const state = analysisStatesByUri.get(uriKey);
-  if (!state) {
-    return;
-  }
+    const issueCount = result.resultCount;
+    this.statusBarCompletionMessage = issueCount > 0
+      ? `$(check) ${this.formatIssueSummary(issueCount)}`
+      : '$(check) No issues';
+    if (this.statusBarCompletionTimer) {
+      clearTimeout(this.statusBarCompletionTimer);
+    }
+    this.statusBarCompletionTimer = setTimeout(() => {
+      this.statusBarCompletionMessage = undefined;
+      this.statusBarCompletionTimer = undefined;
+      this.updateAnalysisStatusBar();
+    }, STATUS_BAR_COMPLETION_DURATION_MS);
+    this.updateAnalysisStatusBar();
 
-  state.stage = `Collecting results: ${formatIssueSummary(count)}`;
-  updateProgressNotificationMessage(uriKey);
-  updateAnalysisStatusBar();
-}
+    const filename = path.basename(uri.fsPath);
+    const durationText = state ? ` in ${this.formatDurationMs(result.duration)}` : '';
+    if (result.resultCount === 0) {
+      void vscode.window.showInformationMessage(`Analysis of ${filename} complete${durationText}: no issues found.`);
+      return;
+    }
 
-const analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
-
-interface AnalysisSnapshot {
-  fingerprint: string;
-  resultCount: number;
-}
-
-function computeAnalysisFingerprint(document: vscode.TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
-  return createHash('sha256')
-    .update(document.getText())
-    .update('\0')
-    .update(JSON.stringify(customDiagnostics ?? []))
-    .digest('hex');
-}
-
-function recordAnalysisSnapshot(document: vscode.TextDocument, customDiagnostics: CustomDiagnosticConfig[] | undefined, resultCount: number): void {
-  analysisSnapshotsByUri.set(document.uri.toString(), {
-    fingerprint: computeAnalysisFingerprint(document, customDiagnostics),
-    resultCount,
-  });
-}
-
-async function getCurrentAnalysisSnapshot(uri: vscode.Uri, customDiagnostics?: CustomDiagnosticConfig[]): Promise<{
-  document: vscode.TextDocument;
-  diagnostics: vscode.Diagnostic[];
-  isFresh: boolean;
-  resultCount: number | undefined;
-}> {
-  const document = await vscode.workspace.openTextDocument(uri);
-  const cachedSnapshot = analysisSnapshotsByUri.get(uri.toString());
-  const isFresh = cachedSnapshot?.fingerprint === computeAnalysisFingerprint(document, customDiagnostics);
-
-  return {
-    document,
-    diagnostics: getExtensionDiagnostics(uri),
-    isFresh,
-    resultCount: cachedSnapshot?.resultCount,
-  };
-}
-
-async function completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
-  const uriKey = uri.toString();
-  const state = analysisStatesByUri.get(uriKey);
-  if (state?.resolveProgress) {
-    state.resolveProgress();
-  }
-  pendingAnalysisUris.delete(uriKey);
-  analysisStatesByUri.delete(uriKey);
-  updateIsAnalyzingContext();
-
-  const issueCount = result.resultCount;
-  statusBarCompletionMessage = issueCount > 0
-    ? `$(check) ${formatIssueSummary(issueCount)}`
-    : `$(check) No issues`;
-  if (statusBarCompletionTimer) {
-    clearTimeout(statusBarCompletionTimer);
-  }
-  statusBarCompletionTimer = setTimeout(() => {
-    statusBarCompletionMessage = undefined;
-    statusBarCompletionTimer = undefined;
-    updateAnalysisStatusBar();
-  }, STATUS_BAR_COMPLETION_DURATION_MS);
-  updateAnalysisStatusBar();
-
-  const filename = path.basename(uri.fsPath);
-  const durationText = state ? ` in ${formatDurationMs(result.duration)}` : '';
-  if (result.resultCount === 0) {
-    void vscode.window.showInformationMessage(`Analysis of ${filename} complete${durationText}: no issues found.`);
-    return;
+    await this.notifyAndFocusProblems(uri, result.resultCount, filename, durationText);
   }
 
-  await notifyAndFocusProblems(uri, result.resultCount, filename, durationText);
+  private formatIssueSummary(count: number): string {
+    return count === 1 ? '1 issue found' : `${count} issues found`;
+  }
+
+  private formatDurationMs(durationMs: number): string {
+    const seconds = Math.max(1, Math.round(durationMs / 1000));
+    return `${seconds}s`;
+  }
+
+  private updateAnalysisStatusBar(): void {
+    if (!this.statusBarItem) {
+      return;
+    }
+
+    const runningCount = this.analysisStatesByUri.size;
+    if (runningCount === 0) {
+      if (this.statusBarCompletionMessage) {
+        this.statusBarItem.text = this.statusBarCompletionMessage;
+        this.statusBarItem.command = 'workbench.actions.view.problems';
+        this.statusBarItem.tooltip = 'Click to open Problems panel';
+        this.statusBarItem.show();
+      } else {
+        this.statusBarItem.command = undefined;
+        this.statusBarItem.hide();
+      }
+      return;
+    }
+
+    const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
+    const activeState = activeUri ? this.analysisStatesByUri.get(activeUri) : undefined;
+    const fallbackState = activeState ?? this.analysisStatesByUri.values().next().value as AnalysisState;
+    const scope = runningCount > 1 ? ` (${runningCount} files)` : '';
+
+    this.statusBarItem.text = `$(sync~spin) Analyze: ${fallbackState.stage}${scope}`;
+    this.statusBarItem.command = undefined;
+    this.statusBarItem.tooltip = 'Chat Customizations Evaluations analysis in progress';
+    this.statusBarItem.show();
+  }
+
+  private updateIsAnalyzingContext(): void {
+    void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.pendingAnalysisUris.size > 0);
+  }
+
+  private updateHasDiagnosticsContext(): void {
+    const editor = vscode.window.activeTextEditor;
+    const hasDiagnostics = editor ? this.urisWithDiagnostics.has(editor.document.uri.toString()) : false;
+    void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
+  }
+
+  private updateProgressNotificationMessage(uri: string): void {
+    const state = this.analysisStatesByUri.get(uri);
+    if (!state?.progressReporter) {
+      return;
+    }
+
+    state.progressReporter.report({ message: state.stage });
+  }
+
+  private startProgressNotification(uri: string): void {
+    const state = this.analysisStatesByUri.get(uri);
+    if (!state) {
+      return;
+    }
+
+    void vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Running prompt analysis',
+        cancellable: false,
+      },
+      async (progress) => {
+        const currentState = this.analysisStatesByUri.get(uri);
+        if (!currentState) {
+          return;
+        }
+
+        currentState.progressReporter = progress;
+        progress.report({ message: currentState.stage });
+
+        await new Promise<void>((resolve) => {
+          currentState.resolveProgress = resolve;
+        });
+      }
+    );
+  }
+
+  private markDiagnosticsFound(uri: vscode.Uri, count: number): void {
+    const uriKey = uri.toString();
+    const state = this.analysisStatesByUri.get(uriKey);
+    if (!state) {
+      return;
+    }
+
+    state.stage = `Collecting results: ${this.formatIssueSummary(count)}`;
+    this.updateProgressNotificationMessage(uriKey);
+    this.updateAnalysisStatusBar();
+  }
+
+  private computeAnalysisFingerprint(document: vscode.TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
+    return createHash('sha256')
+      .update(document.getText())
+      .update('\0')
+      .update(JSON.stringify(customDiagnostics ?? []))
+      .digest('hex');
+  }
+
+  private async notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, filename: string, durationSuffix = ''): Promise<void> {
+    const message = `Analysis of ${filename} complete${durationSuffix}: ${this.formatIssueSummary(resultCount)}.`;
+    const diagnostics = getExtensionDiagnostics(uri)
+      .slice()
+      .sort((a, b) => {
+        if (a.range.start.line !== b.range.start.line) {
+          return a.range.start.line - b.range.start.line;
+        }
+        return a.range.start.character - b.range.start.character;
+      });
+    const hasNonFixableDiagnostics = diagnostics.some(diagnostic => isNonFixableDiagnostic(diagnostic));
+
+    void (async () => {
+      const actions = hasNonFixableDiagnostics
+        ? [ACTION_SHOW_PROBLEMS, ACTION_ANALYZE_AGAIN]
+        : [ACTION_SHOW_PROBLEMS, ACTION_FIX_DIAGNOSTICS];
+      const action = await vscode.window.showInformationMessage(message, ...actions);
+      if (action === ACTION_SHOW_PROBLEMS) {
+        await vscode.commands.executeCommand('workbench.actions.view.problems');
+      } else if (action === ACTION_ANALYZE_AGAIN) {
+        await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
+      } else if (action === ACTION_FIX_DIAGNOSTICS) {
+        await vscode.commands.executeCommand('chatCustomizationsEvaluations.fixDiagnostics');
+      }
+    })();
+
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
+    const firstDiagnostic = diagnostics[0];
+
+    if (!firstDiagnostic) {
+      return;
+    }
+
+    editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
+    editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
 }
 
-interface CustomDiagnosticConfig {
-  name: string;
-  description: string;
-}
-
-interface AnalyzeRequest {
-  uri: string;
-  customDiagnostics?: CustomDiagnosticConfig[];
-}
-
-interface SkillContext {
-  uri: vscode.Uri;
-  skillFilePath: string;
-  skillDirPath: string;
-  skillName: string;
-  workspaceRoot: string;
-}
-
-interface EvalScaffoldSummary {
-  evalPath: string;
-  createdFiles: string[];
-}
-
-interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
 
 let client: LanguageClient;
 let outputChannel: vscode.OutputChannel;
@@ -328,7 +399,7 @@ let cachedModel: vscode.LanguageModelChat | undefined;
 let modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
 let extensionContext: vscode.ExtensionContext;
 let telemetryLogger: vscode.TelemetryLogger | undefined;
-type TelemetryData = Record<string, string | number | boolean | undefined>;
+let analysisCoordinator!: AnalysisCoordinator;
 
 class ExtensionTelemetrySender implements vscode.TelemetrySender {
   constructor(
@@ -492,11 +563,10 @@ function getCustomizationUri(obj: unknown): vscode.Uri | undefined {
 export function activate(context: vscode.ExtensionContext) {
   extensionContext = context;
   outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
+  analysisCoordinator = new AnalysisCoordinator();
+  analysisCoordinator.initialize(context);
   telemetryLogger = createExtensionTelemetryLogger(context);
   context.subscriptions.push(telemetryLogger);
-  analysisStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
-  analysisStatusBarItem.name = 'Chat Customizations Evaluations Analysis Status';
-  context.subscriptions.push(analysisStatusBarItem);
   logTelemetryUsage('extension/activate', {
     workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
   });
@@ -508,10 +578,6 @@ export function activate(context: vscode.ExtensionContext) {
     logTelemetryUsage,
     logTelemetryError,
   });
-
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
-    updateAnalysisStatusBar();
-  }));
 
   outputChannel.appendLine(`[Activation] Extension path: ${context.extensionPath}`);
 
@@ -570,7 +636,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register the LLM proxy handler — the server will send requests here
   client.onRequest(LLMRequestType, async (request: LLMProxyRequest): Promise<LLMProxyResponse> => {
-    markLLMRequestStart();
+    analysisCoordinator?.markLLMRequestStart();
     outputChannel.appendLine('[LLM Proxy] Received request from server');
     try {
       const result = await handleLLMProxyRequest(request);
@@ -581,7 +647,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       return result;
     } finally {
-      markLLMRequestDone();
+      analysisCoordinator?.markLLMRequestDone();
     }
   });
 
@@ -594,7 +660,7 @@ export function activate(context: vscode.ExtensionContext) {
         logTelemetryUsage('command/analyzePrompt/result', { outcome: 'noActiveEditor' });
         return;
       }
-      if (pendingAnalysisUris.has(editor.document.uri.toString())) {
+      if (analysisCoordinator?.isAnalysisPending(editor.document.uri)) {
         logTelemetryUsage('command/analyzePrompt/result', { outcome: 'alreadyRunning' });
         return;
       }
@@ -605,10 +671,10 @@ export function activate(context: vscode.ExtensionContext) {
       };
 
       // Check if analysis is already fresh and show a message instead of rerunning
-      const currentSnapshot = await getCurrentAnalysisSnapshot(editor.document.uri, analyzeRequest.customDiagnostics);
+      const currentSnapshot = await analysisCoordinator.getCurrentAnalysisSnapshot(editor.document.uri, analyzeRequest.customDiagnostics);
       if (currentSnapshot.isFresh) {
         if (currentSnapshot.diagnostics.length > 0) {
-          await focusExistingDiagnostics(editor.document.uri);
+          await analysisCoordinator.focusExistingDiagnostics(editor.document.uri);
           logTelemetryUsage('command/analyzePrompt/result', {
             outcome: 'alreadyCurrentWithDiagnostics',
             resultCount: currentSnapshot.diagnostics.length,
@@ -627,19 +693,19 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      beginAnalysis(editor.document.uri.toString());
-      markAnalysisStage('Submitting analysis request...');
+      analysisCoordinator.beginAnalysis(editor.document.uri.toString());
+      analysisCoordinator.markAnalysisStage('Submitting analysis request...');
       try {
         // Send request to server to trigger full analysis
         const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-        recordAnalysisSnapshot(editor.document, analyzeRequest.customDiagnostics, result.resultCount);
+        analysisCoordinator.recordAnalysisSnapshot(editor.document, analyzeRequest.customDiagnostics, result.resultCount);
         logTelemetryUsage('command/analyzePrompt/result', {
           outcome: 'success',
           resultCount: result.resultCount,
           durationMs: result.duration,
           customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
         });
-        await completeAnalysis(editor.document.uri, result);
+        await analysisCoordinator.completeAnalysis(editor.document.uri, result);
       } catch (error) {
         logTelemetryError('command/analyzePrompt/result', error, { outcome: 'failed' });
         void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
@@ -726,10 +792,10 @@ export function activate(context: vscode.ExtensionContext) {
         customDiagnostics: getCustomDiagnostics(),
       };
 
-      const currentSnapshot = await getCurrentAnalysisSnapshot(uri, analyzeRequest.customDiagnostics);
+      const currentSnapshot = await analysisCoordinator.getCurrentAnalysisSnapshot(uri, analyzeRequest.customDiagnostics);
       if (currentSnapshot.isFresh) {
         if (currentSnapshot.diagnostics.length > 0) {
-          await focusExistingDiagnostics(uri);
+          await analysisCoordinator.focusExistingDiagnostics(uri);
           logTelemetryUsage('command/analyzePromptFromCustomization/result', {
             outcome: 'alreadyCurrentWithDiagnostics',
             resultCount: currentSnapshot.diagnostics.length,
@@ -748,23 +814,20 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      beginAnalysis(uri.toString());
-      markAnalysisStage('Submitting analysis request...');
+      analysisCoordinator.beginAnalysis(uri.toString());
+      analysisCoordinator.markAnalysisStage('Submitting analysis request...');
       try {
         const result = await client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-        recordAnalysisSnapshot(currentSnapshot.document, analyzeRequest.customDiagnostics, result.resultCount);
+        analysisCoordinator.recordAnalysisSnapshot(currentSnapshot.document, analyzeRequest.customDiagnostics, result.resultCount);
         await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
 
-        await completeAnalysis(uri, result);
+        await analysisCoordinator.completeAnalysis(uri, result);
         logTelemetryUsage('command/analyzePromptFromCustomization/result', {
           outcome: 'success',
           resultCount: result.resultCount,
           durationMs: result.duration,
           customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
         });
-
-        // Update context key based on the active editor
-        updateHasDiagnosticsContext();
       } catch (error) {
         logTelemetryError('command/analyzePromptFromCustomization/result', error, { outcome: 'failed' });
         void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
@@ -776,24 +839,8 @@ export function activate(context: vscode.ExtensionContext) {
   // Track diagnostics to toggle button between "Analyze Prompt" and "Fix Diagnostics"
   context.subscriptions.push(
     vscode.languages.onDidChangeDiagnostics((e) => {
-      for (const uri of e.uris) {
-        const diagnostics = getExtensionDiagnostics(uri);
-        if (diagnostics.length > 0) {
-          urisWithDiagnostics.add(uri.toString());
-        } else {
-          urisWithDiagnostics.delete(uri.toString());
-        }
-
-        if (pendingAnalysisUris.has(uri.toString())) {
-          markDiagnosticsFound(uri, diagnostics.length);
-        }
-      }
-      // Update context key based on the active editor
-      updateHasDiagnosticsContext();
+      analysisCoordinator?.handleDiagnosticsChanged(e.uris);
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => {
-      updateHasDiagnosticsContext();
-    })
   );
 
   // Invalidate cached model when available models change
@@ -820,12 +867,6 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Chat Customizations Evaluations extension activated');
 }
 
-function updateHasDiagnosticsContext(): void {
-  const editor = vscode.window.activeTextEditor;
-  const hasDiagnostics = editor ? urisWithDiagnostics.has(editor.document.uri.toString()) : false;
-  vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
-}
-
 function getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
   return vscode.languages.getDiagnostics(uri).filter(
     d => d.source?.startsWith('chat-customizations-evaluations')
@@ -845,7 +886,7 @@ function diagnosticCodeToString(code: vscode.Diagnostic['code']): string {
 }
 
 function isNonFixableDiagnostic(diagnostic: vscode.Diagnostic): boolean {
-  return NON_FIXABLE_DIAGNOSTIC_CODES.has(diagnosticCodeToString(diagnostic.code));
+  return NON_FIXABLE_DIAGNOSTIC_CODE_SET.has(diagnosticCodeToString(diagnostic.code));
 }
 
 function buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): string {
@@ -868,66 +909,6 @@ function buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagn
     'Diagnostics:',
     payload,
   ].join('\n\n');
-}
-
-async function notifyAndFocusProblems(uri: vscode.Uri, resultCount: number, filename: string, durationSuffix = ''): Promise<void> {
-  const message = `Analysis of ${filename} complete${durationSuffix}: ${formatIssueSummary(resultCount)}.`;
-  const diagnostics = getExtensionDiagnostics(uri)
-    .slice()
-    .sort((a, b) => {
-      if (a.range.start.line !== b.range.start.line) {
-        return a.range.start.line - b.range.start.line;
-      }
-      return a.range.start.character - b.range.start.character;
-    });
-  const hasNonFixableDiagnostics = diagnostics.some(diagnostic => isNonFixableDiagnostic(diagnostic));
-
-  void (async () => {
-    const actions = hasNonFixableDiagnostics
-      ? [ACTION_SHOW_PROBLEMS, ACTION_ANALYZE_AGAIN]
-      : [ACTION_SHOW_PROBLEMS, ACTION_FIX_DIAGNOSTICS];
-    const action = await vscode.window.showInformationMessage(message, ...actions);
-    if (action === ACTION_SHOW_PROBLEMS) {
-      await vscode.commands.executeCommand('workbench.actions.view.problems');
-    } else if (action === ACTION_ANALYZE_AGAIN) {
-      await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
-    } else if (action === ACTION_FIX_DIAGNOSTICS) {
-      await vscode.commands.executeCommand('chatCustomizationsEvaluations.fixDiagnostics');
-    }
-  })();
-
-  const document = await vscode.workspace.openTextDocument(uri);
-  const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
-  const firstDiagnostic = diagnostics[0];
-
-  if (!firstDiagnostic) {
-    return;
-  }
-
-  editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
-  editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-}
-
-async function focusExistingDiagnostics(uri: vscode.Uri): Promise<boolean> {
-  const document = await vscode.workspace.openTextDocument(uri);
-  const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-  const firstDiagnostic = getExtensionDiagnostics(uri)
-    .slice()
-    .sort((a, b) => {
-      if (a.range.start.line !== b.range.start.line) {
-        return a.range.start.line - b.range.start.line;
-      }
-      return a.range.start.character - b.range.start.character;
-    })[0];
-
-  if (!firstDiagnostic) {
-    return false;
-  }
-
-  editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
-  editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-  await vscode.commands.executeCommand('workbench.actions.view.problems');
-  return true;
 }
 
 function getCustomDiagnostics(): CustomDiagnosticConfig[] | undefined {
@@ -1492,44 +1473,44 @@ async function doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
   const userModel = configuration.get<string>('model', '').trim();
 
   if (userModel) {
-    markAnalysisStageWithRequestCount(`Looking for user-selected model: ${userModel}`);
+    analysisCoordinator?.markAnalysisStageWithRequestCount(`Looking for user-selected model: ${userModel}`);
     outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
     const models = await vscode.lm.selectChatModels({ family: userModel });
     outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
     if (models.length > 0) {
       cachedModel = models[0];
-      markAnalysisStageWithRequestCount(`Using user-selected model: ${cachedModel.name}`);
+      analysisCoordinator?.markAnalysisStageWithRequestCount(`Using user-selected model: ${cachedModel.name}`);
       outputChannel.appendLine(`[LLM Proxy] Using user-selected model: ${cachedModel.name} (${cachedModel.vendor}/${cachedModel.family})`);
       return cachedModel;
     }
-    markAnalysisStageWithRequestCount(`User model not found, falling back to default selection...`);
+    analysisCoordinator?.markAnalysisStageWithRequestCount('User model not found, falling back to default selection...');
   }
 
-  markAnalysisStageWithRequestCount('Discovering Copilot models (claude-sonnet-4.6)...');
+  analysisCoordinator?.markAnalysisStageWithRequestCount('Discovering Copilot models (claude-sonnet-4.6)...');
   outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
 
   let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'claude-sonnet-4.6' });
   outputChannel.appendLine(`[LLM Proxy] claude-sonnet-4.6 models found: ${models.length}`);
 
   if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No claude-sonnet-4.6 model found, trying any Copilot model...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('No claude-sonnet-4.6 model found, trying any Copilot model...');
     models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
     outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
   }
 
   if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No Copilot-only match, trying all available models...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('No Copilot-only match, trying all available models...');
     models = await vscode.lm.selectChatModels();
     outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
   }
 
   if (models.length === 0) {
-    markAnalysisStageWithRequestCount('No model available.');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('No model available.');
     return undefined;
   }
 
   cachedModel = models[0];
-  markAnalysisStageWithRequestCount(`Using model: ${cachedModel.name}`);
+  analysisCoordinator?.markAnalysisStageWithRequestCount(`Using model: ${cachedModel.name}`);
   outputChannel.appendLine(`[LLM Proxy] Using model: ${cachedModel.name} (${cachedModel.vendor}/${cachedModel.family})`);
   return cachedModel;
 }
@@ -1542,7 +1523,7 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
   const cts = new vscode.CancellationTokenSource();
   const timeout = setTimeout(() => cts.cancel(), LLM_REQUEST_TIMEOUT_MS);
   try {
-    markAnalysisStageWithRequestCount('Preparing Copilot request payload...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('Preparing Copilot request payload...');
     const model = await selectModel();
 
     if (!model) {
@@ -1555,22 +1536,22 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
     ];
 
     // Send the request
-    markAnalysisStageWithRequestCount('Sending request to Copilot...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('Sending request to Copilot...');
     const response = await model.sendRequest(messages, {}, cts.token);
 
     // Collect the streamed response
-    markAnalysisStageWithRequestCount('Streaming Copilot response...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('Streaming Copilot response...');
     let text = '';
     let chunkCount = 0;
     for await (const part of response.text) {
       text += part;
       chunkCount += 1;
       if (chunkCount <= 3 || chunkCount % 10 === 0) {
-        markAnalysisStageWithRequestCount(`Streaming Copilot response (chunk ${chunkCount})...`);
+        analysisCoordinator?.markAnalysisStageWithRequestCount(`Streaming Copilot response (chunk ${chunkCount})...`);
       }
     }
 
-    markAnalysisStageWithRequestCount('Processing Copilot response...');
+    analysisCoordinator?.markAnalysisStageWithRequestCount('Processing Copilot response...');
 
     return { text };
   } catch (error) {
@@ -1584,9 +1565,7 @@ async function handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxy
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  if (statusBarCompletionTimer) {
-    clearTimeout(statusBarCompletionTimer);
-  }
+  analysisCoordinator?.dispose();
   logTelemetryUsage('extension/deactivate');
   telemetryLogger?.dispose();
   if (!client) {
