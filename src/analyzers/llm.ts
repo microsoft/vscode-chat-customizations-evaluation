@@ -20,6 +20,11 @@ export class LLMAnalyzer {
   /** Maximum total characters to include in composed text sent to LLM */
   private static readonly MAX_COMPOSED_SIZE = 100_000;
 
+  private static readonly EMPTY_RANGE = {
+    start: { line: 0, character: 0 },
+    end: { line: 0, character: 1 },
+  };
+
   /**
    * Extract JSON from an LLM response that may be wrapped in markdown code fences
    * or contain leading/trailing non-JSON text.
@@ -50,10 +55,7 @@ export class LLMAnalyzer {
       code: 'llm-error',
       message: `LLM analysis failed${phaseLabel}: ${this.formatError(error)}`,
       severity: 'warning',
-      range: {
-        start: { line: 0, character: 0 },
-        end: { line: 0, character: 1 },
-      },
+      range: LLMAnalyzer.EMPTY_RANGE,
       analyzer: 'llm-analyzer',
     };
   }
@@ -66,88 +68,70 @@ export class LLMAnalyzer {
       code: 'llm-parse-error',
       message: `Analysis ran but couldn't parse results — try again. (${error instanceof Error ? error.message : 'JSON parse error'})`,
       severity: 'info',
-      range: {
-        start: { line: 0, character: 0 },
-        end: { line: 0, character: 1 },
-      },
+      range: LLMAnalyzer.EMPTY_RANGE,
       analyzer: 'llm-analyzer',
     };
   }
 
-  /**
-   * Set a proxy function for LLM calls (vscode.lm / Copilot integration).
-   */
-  setProxyFn(fn: LLMProxyFn): void {
-    this.proxyFn = fn;
+  private getDocumentStartRange(doc: TextDocument): AnalysisResult['range'] {
+    return {
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: this.getLines(doc)[0]?.length || 0 },
+    };
   }
 
-  /**
-   * Returns true if LLM analysis can run (proxy is configured).
-   */
-  isAvailable(): boolean {
-    return !!this.proxyFn;
+  private getRangeFromText(doc: TextDocument, text: string): AnalysisResult['range'] {
+    const { line, startChar, endChar } = this.findTextRange(doc, text);
+    return {
+      start: { line, character: startChar },
+      end: { line, character: endChar },
+    };
   }
 
-  async analyze(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
-    if (!this.isAvailable()) {
-      return [{
-        code: 'llm-disabled',
-        message: 'LLM-powered analysis is disabled.',
-        severity: 'hint',
-        range: {
-          start: { line: 0, character: 0 },
-          end: { line: 0, character: 1 },
-        },
-        analyzer: 'llm-analyzer',
-      }];
+  private createDiagnostic(
+    doc: TextDocument,
+    diagnostic: Omit<AnalysisResult, 'range'> & { relevantText?: string; wholeDocument?: boolean },
+  ): AnalysisResult {
+    const range = diagnostic.wholeDocument
+      ? this.getDocumentStartRange(doc)
+      : this.getRangeFromText(doc, diagnostic.relevantText || '');
+
+    return {
+      code: diagnostic.code,
+      message: diagnostic.message,
+      severity: diagnostic.severity,
+      range,
+      analyzer: diagnostic.analyzer,
+      suggestion: diagnostic.suggestion,
+    };
+  }
+
+  private getLines(doc: TextDocument): string[] {
+    return doc.getText().split('\n');
+  }
+
+  private buildCustomDiagnosticsPrompt(customDiagnostics?: CustomDiagnosticConfig[]): string {
+    if (!customDiagnostics?.length) {
+      return '';
     }
 
-    const results: AnalysisResult[] = [];
-
-    try {
-      // Run combined analysis + composition conflicts in parallel
-      const phases = [
-        { name: 'combined', promise: this.analyzeCombined(doc, customDiagnostics) },
-        { name: 'composition-conflicts', promise: this.analyzeCompositionConflicts(doc) },
-      ] as const;
-      const settled = await Promise.allSettled(phases.map(p => p.promise));
-
-      for (let i = 0; i < settled.length; i++) {
-        const result = settled[i];
-        if (result.status === 'fulfilled') {
-          results.push(...result.value);
-        } else {
-          results.push(this.makeLLMErrorDiagnostic(result.reason, phases[i].name));
-        }
-      }
-    } catch (error) {
-      results.push(this.makeLLMErrorDiagnostic(error));
-    }
-
-    return results;
-  }
-
-  /**
-   * Combined single-call analysis covering contradictions, ambiguity, persona,
-   * cognitive load, and semantic coverage.
-   */
-  private async analyzeCombined(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
-    const hasCustomDiagnostics = customDiagnostics && customDiagnostics.length > 0;
-
-    const customDiagnosticsPrompt = hasCustomDiagnostics
-      ? `
+    return `
 
 6. **Custom Diagnostics**: Evaluate the prompt against each of the following user-defined diagnostic requirements.
 
 <CUSTOM_DIAGNOSTICS_CONFIG>
-${customDiagnostics!.map((d, i) => `${i + 1}. **${d.name}**: ${d.description}`).join('\n')}
+${customDiagnostics.map((d, i) => `${i + 1}. **${d.name}**: ${d.description}`).join('\n')}
 </CUSTOM_DIAGNOSTICS_CONFIG>
 
-IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagnostic requirements and should be used to produce custom diagnostics findings for each.`
-      : '';
+IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagnostic requirements and should be used to produce custom diagnostics findings for each.`;
+  }
 
-    const customDiagnosticsSchema = hasCustomDiagnostics
-      ? `,
+  private buildCustomDiagnosticsSchema(customDiagnostics?: CustomDiagnosticConfig[]): string {
+    if (!customDiagnostics?.length) {
+      return '';
+    }
+
+    return `,
   "custom_diagnostics": [
     {
       "title": "Name of the custom diagnostic from the config",
@@ -156,10 +140,14 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
       "severity": "error"|"warning"|"info",
       "suggestion": "Concrete rewrite or addition that resolves the issue"
     }
-  ]`
-      : '';
+  ]`;
+  }
 
-    const prompt = `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
+  private buildCombinedAnalysisPrompt(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
+    const customDiagnosticsPrompt = this.buildCustomDiagnosticsPrompt(customDiagnostics);
+    const customDiagnosticsSchema = this.buildCustomDiagnosticsSchema(customDiagnostics);
+
+    return `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
 
 Quality bar for findings:
 - Only report issues you are highly confident are real and materially harmful.
@@ -254,6 +242,89 @@ IMPORTANT:
 - Use empty arrays [] for any category with no issues found.
 - If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
 - Do NOT analyze the frontmatter`;
+  }
+
+  private buildComposedPrompt(doc: TextDocument, linkedTexts: { target: string; content: string }[]): string {
+    const composedParts = [doc.getText()];
+    let totalSize = composedParts[0].length;
+
+    for (const { target, content } of linkedTexts) {
+      if (totalSize >= LLMAnalyzer.MAX_COMPOSED_SIZE) {
+        break;
+      }
+
+      const text = this.sanitizeLinkedContent(content, totalSize);
+      composedParts.push(`\n\n--- begin ${target} ---\n${text}\n--- end ${target} ---\n`);
+      totalSize += text.length;
+    }
+
+    return composedParts.join('\n');
+  }
+
+  private sanitizeLinkedContent(content: string, currentSize: number): string {
+    const sanitized = content
+      .split('<DOCUMENT_TO_ANALYZE>').join('')
+      .split('</DOCUMENT_TO_ANALYZE>').join('');
+    const remaining = LLMAnalyzer.MAX_COMPOSED_SIZE - currentSize;
+    return sanitized.length > remaining ? sanitized.slice(0, remaining) : sanitized;
+  }
+
+  /**
+   * Set a proxy function for LLM calls (vscode.lm / Copilot integration).
+   */
+  setProxyFn(fn: LLMProxyFn): void {
+    this.proxyFn = fn;
+  }
+
+  /**
+   * Returns true if LLM analysis can run (proxy is configured).
+   */
+  isAvailable(): boolean {
+    return !!this.proxyFn;
+  }
+
+  async analyze(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
+    if (!this.isAvailable()) {
+      return [this.createDiagnostic(doc, {
+        code: 'llm-disabled',
+        message: 'LLM-powered analysis is disabled.',
+        severity: 'hint',
+        analyzer: 'llm-analyzer',
+        relevantText: '',
+      })];
+    }
+
+    const results: AnalysisResult[] = [];
+
+    try {
+      // Run combined analysis + composition conflicts in parallel
+      const phases = [
+        { name: 'combined', promise: this.analyzeCombined(doc, customDiagnostics) },
+        { name: 'composition-conflicts', promise: this.analyzeCompositionConflicts(doc) },
+      ] as const;
+      const settled = await Promise.allSettled(phases.map(p => p.promise));
+
+      for (let i = 0; i < settled.length; i++) {
+        const result = settled[i];
+        if (result.status === 'fulfilled') {
+          results.push(...result.value);
+        } else {
+          results.push(this.makeLLMErrorDiagnostic(result.reason, phases[i].name));
+        }
+      }
+    } catch (error) {
+      results.push(this.makeLLMErrorDiagnostic(error));
+    }
+
+    return results;
+  }
+
+  /**
+   * Combined single-call analysis covering contradictions, ambiguity, persona,
+   * cognitive load, and semantic coverage.
+   */
+  private async analyzeCombined(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
+    const prompt = this.buildCombinedAnalysisPrompt(doc, customDiagnostics);
 
     const response = await this.callLLM(prompt);
     const results: AnalysisResult[] = [];
@@ -274,67 +345,53 @@ IMPORTANT:
 
   private processContradictions(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const c of parsed.contradictions || []) {
-      const r1 = this.findTextRange(doc, c.instruction1);
-      const r2 = this.findTextRange(doc, c.instruction2);
+      const primaryRange = this.findTextRange(doc, c.instruction1);
+      const relatedRange = this.findTextRange(doc, c.instruction2);
 
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'contradiction',
         message: `Contradiction: "${c.instruction1}" conflicts with "${c.instruction2}". ${c.explanation}`,
         severity: c.severity === 'error' ? 'error' : 'warning',
-        range: {
-          start: { line: r1.line, character: r1.startChar },
-          end: { line: r1.line, character: r1.endChar },
-        },
         analyzer: 'contradiction-detection',
-      });
+        relevantText: c.instruction1,
+      }));
 
-      if (r2.line !== r1.line) {
-        results.push({
+      if (relatedRange.line !== primaryRange.line) {
+        results.push(this.createDiagnostic(doc, {
           code: 'contradiction-related',
-          message: `Conflicts with line ${r1.line + 1}: "${c.instruction1}". ${c.explanation}`,
+          message: `Conflicts with line ${primaryRange.line + 1}: "${c.instruction1}". ${c.explanation}`,
           severity: 'info',
-          range: {
-            start: { line: r2.line, character: r2.startChar },
-            end: { line: r2.line, character: r2.endChar },
-          },
           analyzer: 'contradiction-detection',
-        });
+          relevantText: c.instruction2,
+        }));
       }
     }
   }
 
   private processAmbiguity(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.ambiguity_issues || []) {
-      const r = this.findTextRange(doc, issue.text);
       const problem = issue.problem ? `${issue.problem} ` : '';
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'ambiguity-llm',
         message: `Ambiguous: "${issue.text}". ${problem}Suggestion: ${issue.suggestion}`,
         severity: issue.severity === 'warning' ? 'warning' : 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'ambiguity-detection',
         suggestion: issue.suggestion,
-      });
+        relevantText: issue.text,
+      }));
     }
   }
 
   private processPersona(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.persona_issues || []) {
-      const r = this.findTextRange(doc, issue.relevant_text);
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'persona-inconsistency',
         message: `Persona conflict: ${issue.description}. The prompt sets "${issue.trait1}" but also "${issue.trait2}". Suggestion: ${issue.suggestion}`,
         severity: issue.severity === 'warning' ? 'warning' : 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'persona-consistency',
         suggestion: issue.suggestion,
-      });
+        relevantText: issue.relevant_text,
+      }));
     }
   }
 
@@ -343,31 +400,24 @@ IMPORTANT:
     if (!cogLoad) return;
 
     if (cogLoad.overall_complexity === 'very-high') {
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'high-complexity',
         message: `Very high cognitive load detected. This prompt may overwhelm the model's attention. Consider breaking it into simpler, focused prompts.`,
         severity: 'warning',
-        range: {
-          start: { line: 0, character: 0 },
-          end: { line: 0, character: doc.getText().split('\n')[0]?.length || 0 },
-        },
         analyzer: 'cognitive-load',
-      });
+        wholeDocument: true,
+      }));
     }
 
     for (const issue of cogLoad.issues || []) {
-      const r = this.findTextRange(doc, issue.relevant_text);
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: `cognitive-${issue.type}`,
         message: `Cognitive load (${issue.type}): ${issue.description}. Suggestion: ${issue.suggestion}`,
         severity: issue.severity === 'warning' ? 'warning' : 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'cognitive-load',
         suggestion: issue.suggestion,
-      });
+        relevantText: issue.relevant_text,
+      }));
     }
   }
 
@@ -376,66 +426,51 @@ IMPORTANT:
     if (!analysis) return;
 
     if (analysis.overall_coverage === 'limited' || analysis.overall_coverage === 'minimal') {
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'limited-coverage',
         message: `Semantic coverage is ${analysis.overall_coverage}. This prompt may produce inconsistent results for edge cases.`,
         severity: 'warning',
-        range: {
-          start: { line: 0, character: 0 },
-          end: { line: 0, character: doc.getText().split('\n')[0]?.length || 0 },
-        },
         analyzer: 'semantic-coverage',
-      });
+        wholeDocument: true,
+      }));
     }
 
     for (const gap of analysis.coverage_gaps || []) {
-      const r = this.findTextRange(doc, gap.relevant_text);
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'coverage-gap',
         message: `Coverage gap: ${gap.gap}. Suggestion: ${gap.suggestion}`,
         severity: gap.impact === 'high' ? 'warning' : 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'semantic-coverage',
         suggestion: gap.suggestion,
-      });
+        relevantText: gap.relevant_text,
+      }));
     }
 
     for (const err of analysis.missing_error_handling || []) {
-      const r = this.findTextRange(doc, err.relevant_text);
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'missing-error-handling',
         message: `Missing error handling: ${err.scenario}. Suggestion: ${err.suggestion}`,
         severity: 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'semantic-coverage',
         suggestion: err.suggestion,
-      });
+        relevantText: err.relevant_text,
+      }));
     }
   }
 
   private processCustomDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
     for (const issue of parsed.custom_diagnostics || []) {
       const relevantText = issue.relevant_text || issue.description;
-      const r = this.findTextRange(doc, relevantText);
       const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
 
-      results.push({
+      results.push(this.createDiagnostic(doc, {
         code: 'custom-diagnostic',
         message: `Custom diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
         severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
-        range: {
-          start: { line: r.line, character: r.startChar },
-          end: { line: r.line, character: r.endChar },
-        },
         analyzer: 'custom-diagnostics',
         suggestion: issue.suggestion,
-      });
+        relevantText,
+      }));
     }
   }
 
@@ -449,22 +484,7 @@ IMPORTANT:
       return [];
     }
 
-    const composedParts = [doc.getText()];
-    let totalSize = composedParts[0].length;
-
-    for (const { target, content } of linkedTexts) {
-      if (totalSize >= LLMAnalyzer.MAX_COMPOSED_SIZE) break;
-      // Strip delimiter markers from linked files to prevent injection boundary spoofing
-      const sanitized = content
-        .split('<DOCUMENT_TO_ANALYZE>').join('')
-        .split('</DOCUMENT_TO_ANALYZE>').join('');
-      const remaining = LLMAnalyzer.MAX_COMPOSED_SIZE - totalSize;
-      const text = sanitized.length > remaining ? sanitized.slice(0, remaining) : sanitized;
-      composedParts.push(`\n\n--- begin ${target} ---\n${text}\n--- end ${target} ---\n`);
-      totalSize += text.length;
-    }
-
-    const composedText = composedParts.join('\n');
+    const composedText = this.buildComposedPrompt(doc, linkedTexts);
 
     const prompt = `Analyze the following composed prompt for conflicts across files. The main prompt imports other prompt files. Look for:
 1. Behavioral conflicts (e.g., "Never refuse" in one file vs "Refuse harmful requests" in another)
@@ -499,18 +519,14 @@ If no conflicts found, return {"conflicts": []}`;
     try {
       const parsed = this.extractJSON<{ conflicts?: LLMCombinedAnalysisResponse['composition_conflicts'] }>(response);
       for (const conflict of parsed.conflicts || []) {
-        const r = this.findTextRange(doc, conflict.instruction1);
-        results.push({
+        results.push(this.createDiagnostic(doc, {
           code: 'composition-conflict',
           message: `Composition conflict: ${conflict.summary}. "${conflict.instruction1}" vs "${conflict.instruction2}"`,
           severity: conflict.severity === 'error' ? 'error' : 'warning',
-          range: {
-            start: { line: r.line, character: r.startChar },
-            end: { line: r.line, character: r.endChar },
-          },
           analyzer: 'composition-conflicts',
           suggestion: conflict.suggestion,
-        });
+          relevantText: conflict.instruction1,
+        }));
       }
     } catch (error) {
       results.push(this.makeParseErrorDiagnostic(error));
@@ -558,9 +574,9 @@ If no conflicts found, return {"conflicts": []}`;
    * Find the location of a piece of text in the document, returning line and column offsets.
    */
   private findTextRange(doc: TextDocument, text: string): { line: number; startChar: number; endChar: number } {
-    if (!text) return { line: 0, startChar: 0, endChar: doc.getText().split('\n')[0]?.length || 0 };
+    const lines = this.getLines(doc);
+    if (!text) return { line: 0, startChar: 0, endChar: lines[0]?.length || 0 };
 
-    const lines = doc.getText().split('\n');
     const lowerText = text.toLowerCase();
 
     // Exact substring match
