@@ -102,4 +102,11 @@ export interface LLMCombinedAnalysisResponse {
     severity: 'error' | 'warning' | 'info';
     suggestion: string;
   }[];
+  other_diagnostics?: {
+    title: string;
+    description: string;
+    relevant_text: string;
+    severity: 'error' | 'warning' | 'info';
+    suggestion?: string;
+  }[];
 }

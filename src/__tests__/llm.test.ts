@@ -281,6 +281,34 @@ describe('LLMAnalyzer', () => {
       expect(customDiagnostics[0].range.start.line).toBe(0);
     });
 
+    it('should include free-form diagnostics returned by the LLM', async () => {
+      const mockProxy = vi.fn().mockResolvedValue({
+        text: JSON.stringify({
+          contradictions: [],
+          ambiguity_issues: [],
+          persona_issues: [],
+          cognitive_load: { issues: [], overall_complexity: 'low' },
+          coverage_analysis: {},
+          other_diagnostics: [{
+            title: 'Unsafe Default Assumption',
+            description: 'The prompt assumes missing data should be fabricated.',
+            relevant_text: 'If data is missing, make a best guess and continue.',
+            severity: 'warning',
+            suggestion: 'Require explicit fallback behavior that avoids fabrication.',
+          }],
+        }),
+      });
+      analyzer.setProxyFn(mockProxy);
+
+      const doc = makeDoc('If data is missing, make a best guess and continue.');
+      const results = await analyzer.analyze(doc);
+      const freeDiagnostics = results.filter(r => r.code === 'llm-free-diagnostic');
+
+      expect(freeDiagnostics.length).toBeGreaterThan(0);
+      expect(freeDiagnostics[0].severity).toBe('warning');
+      expect(freeDiagnostics[0].range.start.line).toBe(0);
+    });
+
     it('should show error diagnostic when one analysis phase rejects but still return other results', async () => {
       // When the proxy errors, analyzeCombined rejects via allSettled.
       // analyzeCompositionConflicts returns early (no linked files), so it fulfills with [].

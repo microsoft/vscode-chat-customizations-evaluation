@@ -143,9 +143,23 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
   ]`;
   }
 
+  private buildOtherDiagnosticsSchema(): string {
+    return `,
+  "other_diagnostics": [
+    {
+      "title": "Short name for a high-confidence issue that does not fit existing categories",
+      "description": "Specific issue found and why it is materially harmful",
+      "relevant_text": "exact text from the prompt where the issue appears",
+      "severity": "error"|"warning"|"info",
+      "suggestion": "Concrete rewrite or addition that resolves the issue"
+    }
+  ]`;
+  }
+
   private buildCombinedAnalysisPrompt(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
     const customDiagnosticsPrompt = this.buildCustomDiagnosticsPrompt(customDiagnostics);
     const customDiagnosticsSchema = this.buildCustomDiagnosticsSchema(customDiagnostics);
+    const otherDiagnosticsSchema = this.buildOtherDiagnosticsSchema();
 
     return `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
 
@@ -231,6 +245,7 @@ Respond with a single JSON object in this exact format:
     "overall_coverage": "comprehensive"|"adequate"|"limited"|"minimal"
   }
 ${customDiagnosticsSchema}
+${otherDiagnosticsSchema}
 }
 
 IMPORTANT:
@@ -241,6 +256,7 @@ IMPORTANT:
 - Do not force findings to fill categories; empty arrays are expected when no high-confidence issue exists.
 - Use empty arrays [] for any category with no issues found.
 - If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
+- You may also include "other_diagnostics" for high-confidence issues that do not fit the listed categories (use [] when none).
 - Do NOT analyze the frontmatter`;
   }
 
@@ -336,6 +352,7 @@ IMPORTANT:
       this.processCognitiveLoad(doc, parsed, results);
       this.processCoverage(doc, parsed, results);
       this.processCustomDiagnostics(doc, parsed, results);
+      this.processOtherDiagnostics(doc, parsed, results);
     } catch (error) {
       results.push(this.makeParseErrorDiagnostic(error));
     }
@@ -468,6 +485,22 @@ IMPORTANT:
         message: `Custom diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
         severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'custom-diagnostics',
+        suggestion: issue.suggestion,
+        relevantText,
+      }));
+    }
+  }
+
+  private processOtherDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
+    for (const issue of parsed.other_diagnostics || []) {
+      const relevantText = issue.relevant_text || issue.description;
+      const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
+
+      results.push(this.createDiagnostic(doc, {
+        code: 'llm-free-diagnostic',
+        message: `Additional diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
+        severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
+        analyzer: 'llm-analyzer',
         suggestion: issue.suggestion,
         relevantText,
       }));
