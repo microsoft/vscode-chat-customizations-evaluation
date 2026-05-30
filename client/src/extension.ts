@@ -794,7 +794,7 @@ class ExtensionRuntime {
 
         await vscode.window.showTextDocument(editor.document, { preview: false, preserveFocus: false });
 
-        const query = this.buildFixDiagnosticsChatQuery(targetUri, fixableDiagnostics);
+        const query = this.buildFixDiagnosticsChatQuery(editor.document, fixableDiagnostics);
         await vscode.commands.executeCommand('workbench.action.chat.open', {
           query,
           isPartialQuery: false,
@@ -904,23 +904,34 @@ class ExtensionRuntime {
     return NON_FIXABLE_DIAGNOSTIC_CODE_SET.has(this.diagnosticCodeToString(diagnostic.code));
   }
 
-  private buildFixDiagnosticsChatQuery(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]): string {
+  private buildFixDiagnosticsChatQuery(document: vscode.TextDocument, diagnostics: vscode.Diagnostic[]): string {
     const payload = diagnostics.map((diagnostic) => {
       const startLine = diagnostic.range.start.line + 1;
       const endLine = diagnostic.range.end.line + 1;
+      const diagnosticWithData = diagnostic as vscode.Diagnostic & { data?: unknown };
+      const message = String(diagnostic.message ?? '').trim();
+      const rawSuggestion = typeof diagnosticWithData.data === 'string' ? diagnosticWithData.data : undefined;
+      const suggestion = rawSuggestion?.trim();
+      const shouldIncludeSuggestion = Boolean(suggestion) && suggestion !== message;
+      const lineText = diagnostic.range.start.line >= 0 && diagnostic.range.start.line < document.lineCount
+        ? document.lineAt(diagnostic.range.start.line).text
+        : 'n/a';
       return [
         `- line: ${startLine}${endLine !== startLine ? `-${endLine}` : ''}`,
-        `  code: ${this.diagnosticCodeToString(diagnostic.code)}`,
-        `  severity: ${vscode.DiagnosticSeverity[diagnostic.severity] ?? 'Unknown'}`,
-        `  message: ${diagnostic.message}`,
-        `  suggestion: ${typeof diagnostic.message === 'string' ? diagnostic.message : 'n/a'}`,
+        ` - lineText: ${lineText}`,
+        ` - message: ${message || 'n/a'}`,
+        ...(shouldIncludeSuggestion ? [`  suggestion: ${suggestion}`] : []),
       ].join('\n');
     }).join('\n');
 
     return [
       '/fix-customization-evaluation-diagnostics',
-      `Target file: ${uri.fsPath}`,
+      `Target file: ${document.uri.fsPath}`,
       'Use ONLY the diagnostics below for this target file. Do not lint or rewrite the skill file itself.',
+      'Field meanings:',
+      '- line: 1-based line number where the diagnostic starts (or start-end for a multi-line range).',
+      '- lineText: exact text currently present at the diagnostic start line in the target file.',
+      '- message: diagnostic description explaining what is wrong and needs to be fixed.',
       'Diagnostics:',
       payload,
     ].join('\n\n');
