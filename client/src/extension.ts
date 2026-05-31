@@ -12,7 +12,7 @@ import {
   handlePostFixDiagnosticsFlow,
   initializeWaza,
   registerWazaCommands,
-} from './waza';
+} from './waza/waza';
 import {
   ACTION_ANALYZE_AGAIN, NON_FIXABLE_DIAGNOSTIC_CODES,
   TELEMETRY_AUTH_TOKEN_ENV,
@@ -23,12 +23,13 @@ import type {
   LLMProxyResponse,
   SkillContext,
   TelemetryData
-} from './extensionTypes';
+} from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { ExtensionTelemetrySender } from './telemetry';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
+type AnalysisSnapshot = Awaited<ReturnType<AnalysisCoordinator['getCurrentAnalysisSnapshot']>>;
 
 class ExtensionRuntime {
 
@@ -47,21 +48,56 @@ class ExtensionRuntime {
   private readonly pendingDiagnosticEditsByUri = new Map<string, { fullDocument: boolean; ranges: vscode.Range[] }>();
 
   activate(context: vscode.ExtensionContext): void {
+    this.initializeCoreServices(context);
+    this.initializeWazaRuntime();
+
+    const serverOptions = this.createServerOptions(context);
+    const clientOptions = this.createClientOptions();
+    this.client = new LanguageClient(
+      'chatCustomizationsEvaluations',
+      'Chat Customizations Evaluations',
+      serverOptions,
+      clientOptions
+    );
+
+    this.registerLanguageClientHandlers();
+    this.registerCommands(context);
+    context.subscriptions.push(...registerWazaCommands(context));
+    this.registerWorkspaceHandlers(context);
+    this.registerModelHandlers(context);
+    this.startLanguageClient();
+
+    console.log('Chat Customizations Evaluations extension activated');
+  }
+
+  deactivate(): Thenable<void> | undefined {
+    this.analysisCoordinator?.dispose();
+    this.logTelemetryUsage('extension/deactivate');
+    this.telemetryLogger?.dispose();
+    if (!this.client) {
+      return undefined;
+    }
+    return this.client.stop();
+  }
+
+  private initializeCoreServices(context: vscode.ExtensionContext): void {
     this.extensionContext = context;
     this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
     this.extensionDiagnosticCollection = vscode.languages.createDiagnosticCollection('chat-customizations-evaluations-client');
     context.subscriptions.push(this.extensionDiagnosticCollection);
+
     this.analysisCoordinator = new AnalysisCoordinator(
       (uri) => this.getExtensionDiagnostics(uri),
       (diagnostic) => this.isNonFixableDiagnostic(diagnostic),
     );
     this.analysisCoordinator.initialize(context);
+
     this.telemetryLogger = this.createExtensionTelemetryLogger(context);
     context.subscriptions.push(this.telemetryLogger);
-    this.logTelemetryUsage('extension/activate', {
-      workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
-    });
+    this.logTelemetryUsage('extension/activate', { workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0 });
+  }
 
+  private initializeWazaRuntime(): void {
     initializeWaza({
       extensionContext: this.extensionContext,
       outputChannel: this.outputChannel,
@@ -69,17 +105,14 @@ class ExtensionRuntime {
       logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
       logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
     });
+  }
 
+  private createServerOptions(context: vscode.ExtensionContext): ServerOptions {
     this.outputChannel.appendLine(`[Activation] Extension path: ${context.extensionPath}`);
-
-    const bundledServer = context.asAbsolutePath(path.join('out', 'server.js'));
-    const devServer = context.asAbsolutePath(path.join('..', 'out', 'server.js'));
-    const serverModule = fs.existsSync(bundledServer) ? bundledServer : devServer;
-
-    this.outputChannel.appendLine(`[Activation] Server module: ${serverModule} (exists: ${fs.existsSync(serverModule)})`);
+    const serverModule = this.resolveServerModulePath(context);
 
     const debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
-    const serverOptions: ServerOptions = {
+    return {
       run: { module: serverModule, transport: TransportKind.ipc },
       debug: {
         module: serverModule,
@@ -87,8 +120,18 @@ class ExtensionRuntime {
         options: debugOptions,
       },
     };
+  }
 
-    const clientOptions: LanguageClientOptions = {
+  private resolveServerModulePath(context: vscode.ExtensionContext): string {
+    const bundledServer = context.asAbsolutePath(path.join('out', 'server.js'));
+    const devServer = context.asAbsolutePath(path.join('..', 'out', 'server.js'));
+    const serverModule = fs.existsSync(bundledServer) ? bundledServer : devServer;
+    this.outputChannel.appendLine(`[Activation] Server module: ${serverModule} (exists: ${fs.existsSync(serverModule)})`);
+    return serverModule;
+  }
+
+  private createClientOptions(): LanguageClientOptions {
+    return {
       documentSelector: [
         { scheme: 'file', language: 'prompt' },
         { scheme: 'file', language: 'chatagent' },
@@ -103,14 +146,7 @@ class ExtensionRuntime {
       },
       middleware: {
         handleDiagnostics: (uri, diagnostics, next) => {
-          const uriKey = uri.toString();
-          const pendingEdit = this.pendingDiagnosticEditsByUri.get(uriKey);
-          const filteredDiagnostics = pendingEdit
-            ? this.filterDiagnosticsForEdit(diagnostics, pendingEdit)
-            : diagnostics;
-
-          this.pendingDiagnosticEditsByUri.delete(uriKey);
-          this.extensionDiagnosticCollection.set(uri, filteredDiagnostics);
+          this.handleLanguageClientDiagnostics(uri, diagnostics);
 
           // Prevent duplicate display by routing diagnostics through the client-owned collection.
           next(uri, []);
@@ -118,13 +154,23 @@ class ExtensionRuntime {
       },
       outputChannel: this.outputChannel,
     };
+  }
 
-    this.client = new LanguageClient(
-      'chatCustomizationsEvaluations',
-      'Chat Customizations Evaluations',
-      serverOptions,
-      clientOptions
-    );
+  private handleLanguageClientDiagnostics(uri: vscode.Uri, diagnostics: readonly vscode.Diagnostic[]): void {
+    const uriKey = uri.toString();
+    const pendingEdit = this.pendingDiagnosticEditsByUri.get(uriKey);
+    const filteredDiagnostics = pendingEdit
+      ? this.filterDiagnosticsForEdit(diagnostics, pendingEdit)
+      : diagnostics;
+
+    this.pendingDiagnosticEditsByUri.delete(uriKey);
+    this.extensionDiagnosticCollection.set(uri, filteredDiagnostics);
+  }
+
+  private registerLanguageClientHandlers(): void {
+    if (!this.client) {
+      return;
+    }
 
     this.client.onNotification('chatCustomizationsEvaluations/contentStale', (_params: { uri: string }) => {
       this.logTelemetryUsage('analysis/contentStaleNotificationShown');
@@ -146,9 +192,9 @@ class ExtensionRuntime {
         this.analysisCoordinator?.markLLMRequestDone(request.uri);
       }
     });
+  }
 
-    this.registerCommands(context);
-    context.subscriptions.push(...registerWazaCommands(context));
+  private registerWorkspaceHandlers(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.languages.onDidChangeDiagnostics((e) => {
         this.analysisCoordinator?.handleDiagnosticsChanged(e.uris);
@@ -162,18 +208,20 @@ class ExtensionRuntime {
         this.extensionDiagnosticCollection.delete(document.uri);
       }),
     );
+  }
 
-    if (vscode.lm && vscode.lm.onDidChangeChatModels) {
-      context.subscriptions.push(
-        vscode.lm.onDidChangeChatModels(() => {
-          this.outputChannel.appendLine('[LLM Proxy] Models changed, clearing cache');
-          this.cachedModel = undefined;
-          this.modelSelectionPromise = undefined;
-        })
-      );
-    }
+  private registerModelHandlers(context: vscode.ExtensionContext): void {
+    context.subscriptions.push(
+      vscode.lm.onDidChangeChatModels(() => {
+        this.outputChannel.appendLine('[LLM Proxy] Models changed, clearing cache');
+        this.cachedModel = undefined;
+        this.modelSelectionPromise = undefined;
+      })
+    );
+  }
 
-    this.client.start().then(() => {
+  private startLanguageClient(): void {
+    this.client?.start().then(() => {
       this.outputChannel.appendLine('[Activation] Language server started successfully');
       this.logTelemetryUsage('extension/languageServerStart', { outcome: 'success' });
     }).catch((err: Error) => {
@@ -181,18 +229,6 @@ class ExtensionRuntime {
       this.logTelemetryError('extension/languageServerStart', err, { outcome: 'failed' });
       this.outputChannel.show(true);
     });
-
-    console.log('Chat Customizations Evaluations extension activated');
-  }
-
-  deactivate(): Thenable<void> | undefined {
-    this.analysisCoordinator?.dispose();
-    this.logTelemetryUsage('extension/deactivate');
-    this.telemetryLogger?.dispose();
-    if (!this.client) {
-      return undefined;
-    }
-    return this.client.stop();
   }
 
   private createExtensionTelemetryLogger(context: vscode.ExtensionContext): vscode.TelemetryLogger {
@@ -322,49 +358,11 @@ class ExtensionRuntime {
       return;
     }
 
-    const analyzeRequest: AnalyzeRequest = {
-      uri: editor.document.uri.toString(),
-      customDiagnostics: this.getCustomDiagnostics(),
-    };
-
-    const currentSnapshot = await this.analysisCoordinator.getCurrentAnalysisSnapshot(editor.document.uri, analyzeRequest.customDiagnostics);
-    if (currentSnapshot.isFresh) {
-      if (currentSnapshot.diagnostics.length > 0) {
-        await this.analysisCoordinator.focusExistingDiagnostics(editor.document.uri);
-        this.logTelemetryUsage('command/analyzePrompt/result', {
-          outcome: 'alreadyCurrentWithDiagnostics',
-          resultCount: currentSnapshot.diagnostics.length,
-          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
-        });
-        vscode.window.showInformationMessage('Analysis is already up to date.');
-        return;
-      }
-      await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
-      this.logTelemetryUsage('command/analyzePrompt/result', {
-        outcome: 'alreadyCurrentNoIssues',
-        resultCount: currentSnapshot.resultCount ?? 0,
-        customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
-      });
-      void vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
-      return;
-    }
-
-    this.analysisCoordinator.beginAnalysis(editor.document.uri.toString());
-    this.analysisCoordinator.markAnalysisStage(editor.document.uri.toString(), 'Submitting analysis request...');
-    try {
-      const result = await this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      this.analysisCoordinator.recordAnalysisSnapshot(editor.document, analyzeRequest.customDiagnostics, result.resultCount);
-      this.logTelemetryUsage('command/analyzePrompt/result', {
-        outcome: 'success',
-        resultCount: result.resultCount,
-        durationMs: result.duration,
-        customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
-      });
-      await this.analysisCoordinator.completeAnalysis(editor.document.uri, result);
-    } catch (error) {
-      this.logTelemetryError('command/analyzePrompt/result', error, { outcome: 'failed' });
-      void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
-    }
+    await this.runAnalyzeWorkflow({
+      uri: editor.document.uri,
+      resultEventName: 'command/analyzePrompt/result',
+      revealDocumentAfterSuccess: false,
+    });
   }
 
   private async handleFixDiagnosticsCommand(): Promise<void> {
@@ -377,14 +375,7 @@ class ExtensionRuntime {
 
     const targetUri = editor.document.uri;
     const initialText = editor.document.getText();
-    const diagnostics = this.getExtensionDiagnostics(targetUri)
-      .slice()
-      .sort((a, b) => {
-        if (a.range.start.line !== b.range.start.line) {
-          return a.range.start.line - b.range.start.line;
-        }
-        return a.range.start.character - b.range.start.character;
-      });
+    const diagnostics = this.getSortedExtensionDiagnostics(targetUri);
 
     if (diagnostics.length === 0) {
       this.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noDiagnostics' });
@@ -393,25 +384,11 @@ class ExtensionRuntime {
     }
 
     const fixableDiagnostics = diagnostics.filter(diagnostic => !this.isNonFixableDiagnostic(diagnostic));
-    if (fixableDiagnostics.length === 0) {
-      this.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'nonFixableDiagnosticsOnly' });
-      const action = await vscode.window.showInformationMessage(
-        'Fix Diagnostics is unavailable for LLM analysis error diagnostics. Run Analyze again.',
-        ACTION_ANALYZE_AGAIN,
-      );
-      if (action === ACTION_ANALYZE_AGAIN) {
-        await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
-      }
+    if (await this.handleNonFixableDiagnosticsOnly(fixableDiagnostics.length)) {
       return;
     }
 
-    await vscode.window.showTextDocument(editor.document, { preview: false, preserveFocus: false });
-
-    const query = this.buildFixDiagnosticsChatQuery(editor.document, fixableDiagnostics);
-    await vscode.commands.executeCommand('workbench.action.chat.open', {
-      query,
-      isPartialQuery: false,
-    });
+    await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
 
     const hasImprovements = await this.waitForDocumentImprovements(
       targetUri,
@@ -447,51 +424,145 @@ class ExtensionRuntime {
       return;
     }
 
-    const analyzeRequest: AnalyzeRequest = {
-      uri: uri.toString(),
-      customDiagnostics: this.getCustomDiagnostics(),
-    };
+    await this.runAnalyzeWorkflow({
+      uri,
+      resultEventName: 'command/analyzePromptFromCustomization/result',
+      revealDocumentAfterSuccess: true,
+    });
+  }
 
-    const currentSnapshot = await this.analysisCoordinator.getCurrentAnalysisSnapshot(uri, analyzeRequest.customDiagnostics);
-    if (currentSnapshot.isFresh) {
-      if (currentSnapshot.diagnostics.length > 0) {
-        await this.analysisCoordinator.focusExistingDiagnostics(uri);
-        this.logTelemetryUsage('command/analyzePromptFromCustomization/result', {
-          outcome: 'alreadyCurrentWithDiagnostics',
-          resultCount: currentSnapshot.diagnostics.length,
-          customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
-        });
-        vscode.window.showInformationMessage('Analysis is already up to date.');
-        return;
-      }
-      await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
-      this.logTelemetryUsage('command/analyzePromptFromCustomization/result', {
-        outcome: 'alreadyCurrentNoIssues',
-        resultCount: currentSnapshot.resultCount ?? 0,
-        customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
-      });
-      vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
+  private async runAnalyzeWorkflow(options: {
+    uri: vscode.Uri;
+    resultEventName: string;
+    revealDocumentAfterSuccess: boolean;
+  }): Promise<void> {
+    const analyzeRequest = this.createAnalyzeRequest(options.uri);
+    const customDiagnosticsCount = analyzeRequest.customDiagnostics?.length ?? 0;
+    const currentSnapshot = await this.analysisCoordinator.getCurrentAnalysisSnapshot(options.uri, analyzeRequest.customDiagnostics);
+
+    if (await this.handleFreshAnalysisSnapshot(options.uri, currentSnapshot, options.resultEventName, customDiagnosticsCount)) {
       return;
     }
 
-    this.analysisCoordinator.beginAnalysis(uri.toString());
-    this.analysisCoordinator.markAnalysisStage(uri.toString(), 'Submitting analysis request...');
-    try {
-      const result = await this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
-      this.analysisCoordinator.recordAnalysisSnapshot(currentSnapshot.document, analyzeRequest.customDiagnostics, result.resultCount);
-      await vscode.window.showTextDocument(currentSnapshot.document, { preview: false, preserveFocus: false });
+    await this.executeAnalyzeRequest({
+      uri: options.uri,
+      snapshot: currentSnapshot,
+      analyzeRequest,
+      resultEventName: options.resultEventName,
+      customDiagnosticsCount,
+      revealDocumentAfterSuccess: options.revealDocumentAfterSuccess,
+    });
+  }
 
-      await this.analysisCoordinator.completeAnalysis(uri, result);
-      this.logTelemetryUsage('command/analyzePromptFromCustomization/result', {
+  private createAnalyzeRequest(uri: vscode.Uri): AnalyzeRequest {
+    return {
+      uri: uri.toString(),
+      customDiagnostics: this.getCustomDiagnostics(),
+    };
+  }
+
+  private async handleFreshAnalysisSnapshot(
+    uri: vscode.Uri,
+    snapshot: AnalysisSnapshot,
+    resultEventName: string,
+    customDiagnosticsCount: number,
+  ): Promise<boolean> {
+    if (!snapshot.isFresh) {
+      return false;
+    }
+
+    if (snapshot.diagnostics.length > 0) {
+      await this.analysisCoordinator.focusExistingDiagnostics(uri);
+      this.logTelemetryUsage(resultEventName, {
+        outcome: 'alreadyCurrentWithDiagnostics',
+        resultCount: snapshot.diagnostics.length,
+        customDiagnosticsCount,
+      });
+      vscode.window.showInformationMessage('Analysis is already up to date.');
+      return true;
+    }
+
+    await vscode.window.showTextDocument(snapshot.document, { preview: false, preserveFocus: false });
+    this.logTelemetryUsage(resultEventName, {
+      outcome: 'alreadyCurrentNoIssues',
+      resultCount: snapshot.resultCount ?? 0,
+      customDiagnosticsCount,
+    });
+    void vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
+    return true;
+  }
+
+  private async executeAnalyzeRequest(options: {
+    uri: vscode.Uri;
+    snapshot: AnalysisSnapshot;
+    analyzeRequest: AnalyzeRequest;
+    resultEventName: string;
+    customDiagnosticsCount: number;
+    revealDocumentAfterSuccess: boolean;
+  }): Promise<void> {
+    this.analysisCoordinator.beginAnalysis(options.uri.toString());
+    this.analysisCoordinator.markAnalysisStage(options.uri.toString(), 'Submitting analysis request...');
+
+    try {
+      const result = await this.sendAnalyzeRequest(options.analyzeRequest);
+      this.analysisCoordinator.recordAnalysisSnapshot(options.snapshot.document, options.analyzeRequest.customDiagnostics, result.resultCount);
+
+      if (options.revealDocumentAfterSuccess) {
+        await vscode.window.showTextDocument(options.snapshot.document, { preview: false, preserveFocus: false });
+      }
+
+      await this.analysisCoordinator.completeAnalysis(options.uri, result);
+      this.logTelemetryUsage(options.resultEventName, {
         outcome: 'success',
         resultCount: result.resultCount,
         durationMs: result.duration,
-        customDiagnosticsCount: analyzeRequest.customDiagnostics?.length ?? 0,
+        customDiagnosticsCount: options.customDiagnosticsCount,
       });
     } catch (error) {
-      this.logTelemetryError('command/analyzePromptFromCustomization/result', error, { outcome: 'failed' });
+      this.logTelemetryError(options.resultEventName, error, { outcome: 'failed' });
       void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
     }
+  }
+
+  private sendAnalyzeRequest(analyzeRequest: AnalyzeRequest): Thenable<{ duration: number; resultCount: number }> {
+    return this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+  }
+
+  private getSortedExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
+    return this.getExtensionDiagnostics(uri)
+      .slice()
+      .sort((a, b) => {
+        if (a.range.start.line !== b.range.start.line) {
+          return a.range.start.line - b.range.start.line;
+        }
+        return a.range.start.character - b.range.start.character;
+      });
+  }
+
+  private async handleNonFixableDiagnosticsOnly(fixableDiagnosticsCount: number): Promise<boolean> {
+    if (fixableDiagnosticsCount > 0) {
+      return false;
+    }
+
+    this.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'nonFixableDiagnosticsOnly' });
+    const action = await vscode.window.showInformationMessage(
+      'Fix Diagnostics is unavailable for LLM analysis error diagnostics. Run Analyze again.',
+      ACTION_ANALYZE_AGAIN,
+    );
+    if (action === ACTION_ANALYZE_AGAIN) {
+      await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
+    }
+
+    return true;
+  }
+
+  private async openFixDiagnosticsChat(document: vscode.TextDocument, diagnostics: vscode.Diagnostic[]): Promise<void> {
+    await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+    const query = this.buildFixDiagnosticsChatQuery(document, diagnostics);
+    await vscode.commands.executeCommand('workbench.action.chat.open', {
+      query,
+      isPartialQuery: false,
+    });
   }
 
   private getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
@@ -613,7 +684,7 @@ class ExtensionRuntime {
         ? document.lineAt(diagnostic.range.start.line).text
         : 'n/a';
       return [
-        `- line: ${startLine}${endLine !== startLine ? `-${endLine}` : ''}`,
+        ` - line: ${startLine}${endLine !== startLine ? `-${endLine}` : ''}`,
         ` - lineText: ${lineText}`,
         ` - message: ${message || 'n/a'}`,
         ...(shouldIncludeSuggestion ? [`  suggestion: ${suggestion}`] : []),
@@ -743,23 +814,47 @@ class ExtensionRuntime {
       return undefined;
     }
 
-    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
-    const userModel = configuration.get<string>('model', '').trim();
-
-    if (userModel) {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Looking for user-selected model: ${userModel}`);
-      this.outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
-      const models = await vscode.lm.selectChatModels({ family: userModel });
-      this.outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
-      if (models.length > 0) {
-        this.cachedModel = models[0];
-        this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using user-selected model: ${this.cachedModel.name}`);
-        this.outputChannel.appendLine(`[LLM Proxy] Using user-selected model: ${this.cachedModel.name} (${this.cachedModel.vendor}/${this.cachedModel.family})`);
-        return this.cachedModel;
-      }
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'User model not found, falling back to default selection...');
+    const userSelectedModel = await this.trySelectUserConfiguredModel(analysisUri);
+    if (userSelectedModel) {
+      this.cachedModel = userSelectedModel;
+      return userSelectedModel;
     }
 
+    const fallbackModel = await this.selectFallbackModel(analysisUri);
+    if (!fallbackModel) {
+      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'No model available.');
+      return undefined;
+    }
+
+    this.cachedModel = fallbackModel;
+    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using model: ${this.cachedModel.name}`);
+    this.outputChannel.appendLine(`[LLM Proxy] Using model: ${this.cachedModel.name} (${this.cachedModel.vendor}/${this.cachedModel.family})`);
+    return this.cachedModel;
+  }
+
+  private async trySelectUserConfiguredModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
+    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+    const userModel = configuration.get<string>('model', '').trim();
+    if (!userModel) {
+      return undefined;
+    }
+
+    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Looking for user-selected model: ${userModel}`);
+    this.outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
+    const models = await vscode.lm.selectChatModels({ family: userModel });
+    this.outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
+    if (models.length > 0) {
+      const selectedModel = models[0];
+      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using user-selected model: ${selectedModel.name}`);
+      this.outputChannel.appendLine(`[LLM Proxy] Using user-selected model: ${selectedModel.name} (${selectedModel.vendor}/${selectedModel.family})`);
+      return selectedModel;
+    }
+
+    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'User model not found, falling back to default selection...');
+    return undefined;
+  }
+
+  private async selectFallbackModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
     this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'Discovering Copilot models (claude-sonnet-4.6)...');
     this.outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
 
@@ -778,15 +873,7 @@ class ExtensionRuntime {
       this.outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
     }
 
-    if (models.length === 0) {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'No model available.');
-      return undefined;
-    }
-
-    this.cachedModel = models[0];
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using model: ${this.cachedModel.name}`);
-    this.outputChannel.appendLine(`[LLM Proxy] Using model: ${this.cachedModel.name} (${this.cachedModel.vendor}/${this.cachedModel.family})`);
-    return this.cachedModel;
+    return models[0];
   }
 
   private async handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxyResponse> {
@@ -800,23 +887,12 @@ class ExtensionRuntime {
         return { text: '{}', error: 'No language models available - sign in to GitHub Copilot' };
       }
 
-      const messages = [
-        vscode.LanguageModelChatMessage.User(request.systemPrompt + '\n\n' + request.prompt),
-      ];
+      const messages = this.buildLLMProxyMessages(request);
 
       this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Sending request to Copilot...');
       const response = await model.sendRequest(messages, {}, cts.token);
 
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Streaming Copilot response...');
-      let text = '';
-      let chunkCount = 0;
-      for await (const part of response.text) {
-        text += part;
-        chunkCount += 1;
-        if (chunkCount <= 3 || chunkCount % 10 === 0) {
-          this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, `Streaming Copilot response (chunk ${chunkCount})...`);
-        }
-      }
+      const text = await this.collectStreamedResponseText(response, request.uri);
 
       this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Processing Copilot response...');
 
@@ -829,6 +905,31 @@ class ExtensionRuntime {
       clearTimeout(timeout);
       cts.dispose();
     }
+  }
+
+  private buildLLMProxyMessages(request: LLMProxyRequest): vscode.LanguageModelChatMessage[] {
+    return [
+      vscode.LanguageModelChatMessage.User(request.systemPrompt + '\n\n' + request.prompt),
+    ];
+  }
+
+  private async collectStreamedResponseText(
+    response: vscode.LanguageModelChatResponse,
+    analysisUri: string,
+  ): Promise<string> {
+    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'Streaming Copilot response...');
+
+    let text = '';
+    let chunkCount = 0;
+    for await (const part of response.text) {
+      text += part;
+      chunkCount += 1;
+      if (chunkCount <= 3 || chunkCount % 10 === 0) {
+        this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Streaming Copilot response (chunk ${chunkCount})...`);
+      }
+    }
+
+    return text;
   }
 }
 
