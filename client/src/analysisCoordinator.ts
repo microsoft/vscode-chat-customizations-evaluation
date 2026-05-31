@@ -8,7 +8,7 @@ import {
 import type {
     AnalysisSnapshot,
     AnalysisState, CustomDiagnosticConfig
-} from './extensionTypes';
+} from './types';
 
 const STATUS_BAR_COMPLETION_DURATION_MS = 5000;
 

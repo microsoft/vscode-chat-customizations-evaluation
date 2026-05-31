@@ -12,7 +12,7 @@ import {
   handlePostFixDiagnosticsFlow,
   initializeWaza,
   registerWazaCommands,
-} from './waza';
+} from './waza/waza';
 import {
   ACTION_ANALYZE_AGAIN, NON_FIXABLE_DIAGNOSTIC_CODES,
   TELEMETRY_AUTH_TOKEN_ENV,
@@ -23,7 +23,7 @@ import type {
   LLMProxyResponse,
   SkillContext,
   TelemetryData
-} from './extensionTypes';
+} from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { ExtensionTelemetrySender } from './telemetry';
 
