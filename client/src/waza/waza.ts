@@ -41,138 +41,185 @@ class WazaOrchestrator {
 
     registerWazaCommands(_context: vscode.ExtensionContext): vscode.Disposable[] {
         return [
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaCreateEval', async (obj) => {
-                const { logTelemetryUsage } = this.requireDeps();
-                logTelemetryUsage('command/wazaCreateEval');
-                const skillContext = this.resolveSkillContext(obj);
-                if (!skillContext) {
-                    logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'noSkillContext' });
-                    void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to create an eval scaffold.');
-                    return;
-                }
-
-                const scaffold = await this.createWazaEvalScaffold(skillContext);
-                if (!scaffold) {
-                    logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'failed' });
-                    return;
-                }
-
-                logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'success' });
-                void vscode.window.showInformationMessage(`Created waza eval scaffold for ${skillContext.skillName}.`);
-            }),
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEval', async (obj) => {
-                const { logTelemetryUsage } = this.requireDeps();
-                logTelemetryUsage('command/wazaRunEval');
-                const skillContext = this.resolveSkillContext(obj);
-                if (!skillContext) {
-                    logTelemetryUsage('command/wazaRunEval/result', { outcome: 'noSkillContext' });
-                    void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to run waza evaluation.');
-                    return;
-                }
-
-                const evalPath = this.findEvalPath(skillContext);
-                if (!evalPath) {
-                    logTelemetryUsage('command/wazaRunEval/result', { outcome: 'missingEval' });
-                    const action = await vscode.window.showWarningMessage(
-                        `No eval.yaml found for ${skillContext.skillName}.`,
-                        'Create Eval'
-                    );
-
-                    if (action === 'Create Eval') {
-                        await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaCreateEval', obj);
-                    }
-                    return;
-                }
-
-                await this.runWazaEvaluationForContext(skillContext, evalPath);
-            }),
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEvalFromFile', async () => {
-                const { outputChannel, logTelemetryUsage } = this.requireDeps();
-                logTelemetryUsage('command/wazaRunEvalFromFile');
-                const editor = vscode.window.activeTextEditor;
-                outputChannel.appendLine('[Waza] wazaRunEvalFromFile called');
-                outputChannel.appendLine(`[Waza] Editor: ${editor ? 'exists' : 'null'}`);
-                if (editor) {
-                    outputChannel.appendLine(`[Waza] Document fileName: ${editor.document.fileName}`);
-                    outputChannel.appendLine(`[Waza] Ends with eval.yaml: ${editor.document.fileName.endsWith('eval.yaml')}`);
-                }
-
-                if (!editor || !editor.document.fileName.endsWith('eval.yaml')) {
-                    logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'invalidActiveFile' });
-                    void vscode.window.showWarningMessage('This command requires an eval.yaml file to be active.');
-                    return;
-                }
-
-                const evalUri = editor.document.uri;
-                const evalDir = path.dirname(evalUri.fsPath);
-                outputChannel.appendLine(`[Waza] Eval URI fsPath: ${evalUri.fsPath}`);
-                outputChannel.appendLine(`[Waza] Eval dir: ${evalDir}`);
-
-                const skillFilePath = this.findSkillFilePathFromEvalDir(evalDir);
-                if (!skillFilePath) {
-                    outputChannel.appendLine('[Waza] Could not find SKILL.md');
-                    logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'missingSkillFile' });
-                    void vscode.window.showWarningMessage('Could not find SKILL.md associated with this eval.yaml file.');
-                    return;
-                }
-
-                const skillDirPath = path.dirname(skillFilePath);
-                const skillName = path.basename(skillDirPath);
-                const workspaceFolder = vscode.workspace.getWorkspaceFolder(evalUri);
-                const workspaceRoot = workspaceFolder?.uri.fsPath || path.dirname(skillDirPath);
-
-                const skillContext: SkillContext = {
-                    uri: evalUri,
-                    skillFilePath,
-                    skillDirPath,
-                    skillName,
-                    workspaceRoot,
-                };
-
-                await this.runWazaEvaluationForContext(skillContext, evalUri.fsPath);
-            }),
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaDownloadBinary', async () => {
-                const { outputChannel, logTelemetryUsage, logTelemetryError } = this.requireDeps();
-                logTelemetryUsage('command/wazaDownloadBinary');
-                try {
-                    outputChannel.show(true);
-                    outputChannel.appendLine('[Waza] Downloading latest waza binary...');
-
-                    const installPath = await this.downloadAndInstallWazaBinary();
-                    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
-                    await configuration.update('waza.command', installPath, vscode.ConfigurationTarget.Global);
-
-                    outputChannel.appendLine(`[Waza] Installed to ${installPath}`);
-                    logTelemetryUsage('command/wazaDownloadBinary/result', { outcome: 'success' });
-                    void vscode.window.showInformationMessage(`waza binary downloaded and configured: ${installPath}`);
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : 'Unknown error';
-                    outputChannel.appendLine(`[Waza] Download failed: ${message}`);
-                    logTelemetryError('command/wazaDownloadBinary/result', error, { outcome: 'failed' });
-                    void vscode.window.showErrorMessage(`Failed to download waza binary: ${message}`);
-                }
-            }),
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.openWazaUserGuide', async () => {
-                const { extensionContext, outputChannel, logTelemetryUsage } = this.requireDeps();
-                logTelemetryUsage('command/openWazaUserGuide');
-                const guideService = new WazaGuideService(extensionContext, outputChannel);
-                await guideService.openGuide(
-                    'WAZA-USER-GUIDE.md',
-                    WAZA_USER_GUIDE_FALLBACK,
-                    '[Waza] Guide file not found in extension package; opening built-in fallback guide.',
-                );
-            }),
-            vscode.commands.registerCommand('chatCustomizationsEvaluations.openAnalysisAndFixUserGuide', async () => {
-                const { extensionContext, outputChannel, logTelemetryUsage } = this.requireDeps();
-                logTelemetryUsage('command/openAnalysisAndFixUserGuide');
-                const guideService = new WazaGuideService(extensionContext, outputChannel);
-                await guideService.openGuide(
-                    'ANALYSIS-AND-FIX-USER-GUIDE.md',
-                    ANALYSIS_AND_FIX_USER_GUIDE_FALLBACK,
-                    '[Docs] Analysis and fix guide file not found in extension package; opening built-in fallback guide.',
-                );
-            }),
+            this.registerWazaCreateEvalCommand(),
+            this.registerWazaRunEvalCommand(),
+            this.registerWazaRunEvalFromFileCommand(),
+            this.registerWazaDownloadBinaryCommand(),
+            this.registerOpenWazaUserGuideCommand(),
+            this.registerOpenAnalysisAndFixUserGuideCommand(),
         ];
+    }
+
+    private registerWazaCreateEvalCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaCreateEval', async (obj) => this.handleWazaCreateEvalCommand(obj));
+    }
+
+    private registerWazaRunEvalCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEval', async (obj) => this.handleWazaRunEvalCommand(obj));
+    }
+
+    private registerWazaRunEvalFromFileCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaRunEvalFromFile', async () => this.handleWazaRunEvalFromFileCommand());
+    }
+
+    private registerWazaDownloadBinaryCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.wazaDownloadBinary', async () => this.handleWazaDownloadBinaryCommand());
+    }
+
+    private registerOpenWazaUserGuideCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.openWazaUserGuide', async () => this.handleOpenWazaUserGuideCommand());
+    }
+
+    private registerOpenAnalysisAndFixUserGuideCommand(): vscode.Disposable {
+        return vscode.commands.registerCommand('chatCustomizationsEvaluations.openAnalysisAndFixUserGuide', async () => this.handleOpenAnalysisAndFixUserGuideCommand());
+    }
+
+    private async handleWazaCreateEvalCommand(obj: unknown): Promise<void> {
+        const { logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage('command/wazaCreateEval');
+        const skillContext = this.resolveSkillContext(obj);
+        if (!skillContext) {
+            logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'noSkillContext' });
+            void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to create an eval scaffold.');
+            return;
+        }
+
+        const scaffold = await this.createWazaEvalScaffold(skillContext);
+        if (!scaffold) {
+            logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'failed' });
+            return;
+        }
+
+        logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'success' });
+        void vscode.window.showInformationMessage(`Created waza eval scaffold for ${skillContext.skillName}.`);
+    }
+
+    private async handleWazaRunEvalCommand(obj: unknown): Promise<void> {
+        const { logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage('command/wazaRunEval');
+        const skillContext = this.resolveSkillContext(obj);
+        if (!skillContext) {
+            logTelemetryUsage('command/wazaRunEval/result', { outcome: 'noSkillContext' });
+            void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to run waza evaluation.');
+            return;
+        }
+
+        const evalPath = this.findEvalPath(skillContext);
+        if (!evalPath) {
+            logTelemetryUsage('command/wazaRunEval/result', { outcome: 'missingEval' });
+            const action = await vscode.window.showWarningMessage(
+                `No eval.yaml found for ${skillContext.skillName}.`,
+                'Create Eval'
+            );
+
+            if (action === 'Create Eval') {
+                await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaCreateEval', obj);
+            }
+            return;
+        }
+
+        await this.runWazaEvaluationForContext(skillContext, evalPath);
+    }
+
+    private async handleWazaRunEvalFromFileCommand(): Promise<void> {
+        const { outputChannel, logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage('command/wazaRunEvalFromFile');
+        const editor = vscode.window.activeTextEditor;
+        outputChannel.appendLine('[Waza] wazaRunEvalFromFile called');
+        outputChannel.appendLine(`[Waza] Editor: ${editor ? 'exists' : 'null'}`);
+        if (editor) {
+            outputChannel.appendLine(`[Waza] Document fileName: ${editor.document.fileName}`);
+            outputChannel.appendLine(`[Waza] Ends with eval.yaml: ${editor.document.fileName.endsWith('eval.yaml')}`);
+        }
+
+        if (!editor || !editor.document.fileName.endsWith('eval.yaml')) {
+            logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'invalidActiveFile' });
+            void vscode.window.showWarningMessage('This command requires an eval.yaml file to be active.');
+            return;
+        }
+
+        const evalUri = editor.document.uri;
+        const evalDir = path.dirname(evalUri.fsPath);
+        outputChannel.appendLine(`[Waza] Eval URI fsPath: ${evalUri.fsPath}`);
+        outputChannel.appendLine(`[Waza] Eval dir: ${evalDir}`);
+
+        const skillFilePath = this.findSkillFilePathFromEvalDir(evalDir);
+        if (!skillFilePath) {
+            outputChannel.appendLine('[Waza] Could not find SKILL.md');
+            logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'missingSkillFile' });
+            void vscode.window.showWarningMessage('Could not find SKILL.md associated with this eval.yaml file.');
+            return;
+        }
+
+        const skillContext = this.buildSkillContextForEvalFile(evalUri, skillFilePath);
+        await this.runWazaEvaluationForContext(skillContext, evalUri.fsPath);
+    }
+
+    private buildSkillContextForEvalFile(evalUri: vscode.Uri, skillFilePath: string): SkillContext {
+        const skillDirPath = path.dirname(skillFilePath);
+        const skillName = path.basename(skillDirPath);
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(evalUri);
+        const workspaceRoot = workspaceFolder?.uri.fsPath || path.dirname(skillDirPath);
+
+        return {
+            uri: evalUri,
+            skillFilePath,
+            skillDirPath,
+            skillName,
+            workspaceRoot,
+        };
+    }
+
+    private async handleWazaDownloadBinaryCommand(): Promise<void> {
+        const { outputChannel, logTelemetryUsage, logTelemetryError } = this.requireDeps();
+        logTelemetryUsage('command/wazaDownloadBinary');
+        try {
+            outputChannel.show(true);
+            outputChannel.appendLine('[Waza] Downloading latest waza binary...');
+
+            const installPath = await this.downloadAndInstallWazaBinary();
+            const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
+            await configuration.update('waza.command', installPath, vscode.ConfigurationTarget.Global);
+
+            outputChannel.appendLine(`[Waza] Installed to ${installPath}`);
+            logTelemetryUsage('command/wazaDownloadBinary/result', { outcome: 'success' });
+            void vscode.window.showInformationMessage(`waza binary downloaded and configured: ${installPath}`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            outputChannel.appendLine(`[Waza] Download failed: ${message}`);
+            logTelemetryError('command/wazaDownloadBinary/result', error, { outcome: 'failed' });
+            void vscode.window.showErrorMessage(`Failed to download waza binary: ${message}`);
+        }
+    }
+
+    private async handleOpenWazaUserGuideCommand(): Promise<void> {
+        await this.openGuide(
+            'command/openWazaUserGuide',
+            'WAZA-USER-GUIDE.md',
+            WAZA_USER_GUIDE_FALLBACK,
+            '[Waza] Guide file not found in extension package; opening built-in fallback guide.',
+        );
+    }
+
+    private async handleOpenAnalysisAndFixUserGuideCommand(): Promise<void> {
+        await this.openGuide(
+            'command/openAnalysisAndFixUserGuide',
+            'ANALYSIS-AND-FIX-USER-GUIDE.md',
+            ANALYSIS_AND_FIX_USER_GUIDE_FALLBACK,
+            '[Docs] Analysis and fix guide file not found in extension package; opening built-in fallback guide.',
+        );
+    }
+
+    private async openGuide(
+        telemetryEvent: string,
+        guideFileName: string,
+        fallbackMarkdown: string,
+        fallbackLogMessage: string,
+    ): Promise<void> {
+        const { extensionContext, outputChannel, logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage(telemetryEvent);
+        const guideService = new WazaGuideService(extensionContext, outputChannel);
+        await guideService.openGuide(guideFileName, fallbackMarkdown, fallbackLogMessage);
     }
 
     resolveSkillContext(obj: unknown): SkillContext | undefined {
@@ -532,11 +579,7 @@ class WazaOrchestrator {
         outputChannel.appendLine(`[Waza] Running evaluation for ${context.skillName}`);
         logTelemetryUsage('waza/runEval/start');
 
-        const resultsDir = path.join(extensionContext.globalStorageUri.fsPath, 'results');
-        await fs.promises.mkdir(resultsDir, { recursive: true });
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const resultsFile = path.join(resultsDir, `${context.skillName}-${timestamp}.json`);
+        const resultsFile = await this.createWazaResultsFilePath(extensionContext.globalStorageUri.fsPath, context.skillName);
 
         outputChannel.appendLine(`[Waza] Command: ${this.getWazaCommand()} run ${evalPath} --context-dir ${context.skillDirPath} --output ${resultsFile}`);
 
@@ -545,46 +588,69 @@ class WazaOrchestrator {
             context.workspaceRoot,
         );
 
+        this.appendWazaCommandOutput(result, outputChannel);
+
+        if (result.exitCode !== 0) {
+            this.logAndNotifyWazaRunEvalFailure();
+            return;
+        }
+
+        await this.handleWazaRunEvalSuccess(context, resultsFile);
+    }
+
+    private async createWazaResultsFilePath(globalStoragePath: string, skillName: string): Promise<string> {
+        const resultsDir = path.join(globalStoragePath, 'results');
+        await fs.promises.mkdir(resultsDir, { recursive: true });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        return path.join(resultsDir, `${skillName}-${timestamp}.json`);
+    }
+
+    private appendWazaCommandOutput(result: CommandResult, outputChannel: vscode.OutputChannel): void {
         if (result.stdout) {
             outputChannel.appendLine(result.stdout);
         }
         if (result.stderr) {
             outputChannel.appendLine(result.stderr);
         }
+    }
 
-        if (result.exitCode !== 0) {
-            logTelemetryUsage('waza/runEval/result', { outcome: 'failed' });
-            void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
-            return;
-        }
+    private logAndNotifyWazaRunEvalFailure(): void {
+        const { logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage('waza/runEval/result', { outcome: 'failed' });
+        void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
+    }
 
+    private async handleWazaRunEvalSuccess(context: SkillContext, resultsFile: string): Promise<void> {
+        const { outputChannel, logTelemetryUsage } = this.requireDeps();
         const resultsFileExists = fs.existsSync(resultsFile);
-        const resultsUri = vscode.Uri.file(resultsFile);
 
-        if (resultsFileExists) {
-            const fileUri = resultsUri.toString();
-            outputChannel.appendLine(`[Waza] Results saved to: ${fileUri}`);
-
-            const action = await vscode.window.showInformationMessage(
-                `waza evaluation completed for ${context.skillName}.`,
-                'View Results'
-            );
-
-            if (action === 'View Results') {
-                const document = await vscode.workspace.openTextDocument(resultsUri);
-                await vscode.window.showTextDocument(document, { preview: false });
-            }
-            logTelemetryUsage('waza/runEval/result', {
-                outcome: 'success',
-                resultsFileCreated: true,
-            });
-        } else {
+        if (!resultsFileExists) {
             logTelemetryUsage('waza/runEval/result', {
                 outcome: 'success',
                 resultsFileCreated: false,
             });
             void vscode.window.showInformationMessage(`waza evaluation completed for ${context.skillName}.`);
+            return;
         }
+
+        const resultsUri = vscode.Uri.file(resultsFile);
+        outputChannel.appendLine(`[Waza] Results saved to: ${resultsUri.toString()}`);
+
+        const action = await vscode.window.showInformationMessage(
+            `waza evaluation completed for ${context.skillName}.`,
+            'View Results'
+        );
+
+        if (action === 'View Results') {
+            const document = await vscode.workspace.openTextDocument(resultsUri);
+            await vscode.window.showTextDocument(document, { preview: false });
+        }
+
+        logTelemetryUsage('waza/runEval/result', {
+            outcome: 'success',
+            resultsFileCreated: true,
+        });
     }
 
     private async handleExistingEvalAfterFix(context: SkillContext, evalPath: string): Promise<void> {
@@ -717,28 +783,10 @@ class WazaOrchestrator {
         outputChannel.appendLine(`[Waza] Command: ${this.getWazaCommand()} new eval ${context.skillName}`);
         outputChannel.appendLine(`[Waza] CWD: ${scaffoldCwd}`);
 
-        const result = await this.runWazaCommand(
-            ['new', 'eval', context.skillName],
-            scaffoldCwd,
-            WazaOrchestrator.WAZA_CREATE_TIMEOUT_MS,
-        );
-
-        let finalResult = result;
-        let usedTemporaryWorkspaceFallback = false;
-        const resultText = `${result.stderr}\n${result.stdout}`;
-        if (result.exitCode !== 0 && this.isWazaSkillLookupError(resultText)) {
-            outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
-            finalResult = await this.runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
-            usedTemporaryWorkspaceFallback = true;
-        }
+        const { result: finalResult, usedTemporaryWorkspaceFallback } = await this.runCreateEvalScaffoldCommand(context, scaffoldCwd);
 
         if (finalResult.exitCode !== 0) {
-            logTelemetryUsage('waza/createEvalScaffold/result', {
-                outcome: 'failed',
-                usedTemporaryWorkspaceFallback,
-            });
-            outputChannel.appendLine(`[Waza] eval scaffold failed\n${finalResult.stderr || finalResult.stdout}`);
-            void vscode.window.showErrorMessage('Failed to create waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
+            this.logAndNotifyCreateScaffoldFailure(finalResult, usedTemporaryWorkspaceFallback);
             return undefined;
         }
 
@@ -754,6 +802,46 @@ class WazaOrchestrator {
         }
 
         const createdFiles = this.collectEvalScaffoldFiles(evalPath);
+        return this.logAndBuildScaffoldSummary(evalPath, createdFiles, usedTemporaryWorkspaceFallback);
+    }
+
+    private async runCreateEvalScaffoldCommand(
+        context: SkillContext,
+        scaffoldCwd: string,
+    ): Promise<{ result: CommandResult; usedTemporaryWorkspaceFallback: boolean }> {
+        const { outputChannel } = this.requireDeps();
+        const firstAttempt = await this.runWazaCommand(
+            ['new', 'eval', context.skillName],
+            scaffoldCwd,
+            WazaOrchestrator.WAZA_CREATE_TIMEOUT_MS,
+        );
+
+        const firstAttemptText = `${firstAttempt.stderr}\n${firstAttempt.stdout}`;
+        if (firstAttempt.exitCode === 0 || !this.isWazaSkillLookupError(firstAttemptText)) {
+            return { result: firstAttempt, usedTemporaryWorkspaceFallback: false };
+        }
+
+        outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
+        const fallbackResult = await this.runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
+        return { result: fallbackResult, usedTemporaryWorkspaceFallback: true };
+    }
+
+    private logAndNotifyCreateScaffoldFailure(result: CommandResult, usedTemporaryWorkspaceFallback: boolean): void {
+        const { outputChannel, logTelemetryUsage } = this.requireDeps();
+        logTelemetryUsage('waza/createEvalScaffold/result', {
+            outcome: 'failed',
+            usedTemporaryWorkspaceFallback,
+        });
+        outputChannel.appendLine(`[Waza] eval scaffold failed\n${result.stderr || result.stdout}`);
+        void vscode.window.showErrorMessage('Failed to create waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
+    }
+
+    private logAndBuildScaffoldSummary(
+        evalPath: string,
+        createdFiles: string[],
+        usedTemporaryWorkspaceFallback: boolean,
+    ): EvalScaffoldSummary {
+        const { logTelemetryUsage } = this.requireDeps();
         logTelemetryUsage('waza/createEvalScaffold/result', {
             outcome: 'success',
             usedTemporaryWorkspaceFallback,
