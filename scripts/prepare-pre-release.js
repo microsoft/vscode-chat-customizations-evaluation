@@ -24,8 +24,7 @@ const date = new Date();
 const month = date.getMonth() + 1;
 const day = date.getDate();
 const hours = date.getHours();
-const minutes = date.getMinutes();
-const patch = `${date.getFullYear()}${prependZero(month)}${prependZero(day)}${prependZero(hours)}${prependZero(minutes)}`;
+const patch = `${date.getFullYear()}${prependZero(month)}${prependZero(day)}${prependZero(hours)}`;
 
 // The stable version should always be <major>.<minor_even_number>.patch
 // For the nightly build, we keep the major, make the minor an odd number with +1, and add the timestamp as a patch.
