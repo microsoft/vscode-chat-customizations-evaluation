@@ -482,14 +482,8 @@ class ExtensionRuntime {
       return true;
     }
 
-    await vscode.window.showTextDocument(snapshot.document, { preview: false, preserveFocus: false });
-    this.logTelemetryUsage(resultEventName, {
-      outcome: 'alreadyCurrentNoIssues',
-      resultCount: snapshot.resultCount ?? 0,
-      customDiagnosticsCount,
-    });
-    void vscode.window.showInformationMessage('Analysis is already up to date: no issues found.');
-    return true;
+    // If the previous analysis produced no diagnostics, run again instead of short-circuiting.
+    return false;
   }
 
   private async executeAnalyzeRequest(options: {
