@@ -30,14 +30,213 @@ export class LLMAnalyzer {
    * or contain leading/trailing non-JSON text.
    */
   private extractJSON<T>(text: string): T {
-    // Strip markdown code fences: ```json ... ``` or ``` ... ```
-    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    const raw = fenceMatch ? fenceMatch[1].trim() : text.trim();
-    // Slice from first { to last } to tolerate leading/trailing prose
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    const jsonStr = start !== -1 && end > start ? raw.slice(start, end + 1) : raw;
-    return JSON.parse(jsonStr) as T;
+    // Try several extraction strategies because model output may include fences,
+    // pre/post prose, or slightly invalid JSON.
+    const candidates = this.buildJSONCandidates(text);
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      const normalized = candidate.trim();
+      if (!normalized) {
+        continue;
+      }
+
+      try {
+        return JSON.parse(normalized) as T;
+      } catch (error) {
+        lastError = error;
+      }
+
+      // If strict parse fails, run a conservative repair pass for common model mistakes.
+      const repaired = this.repairCommonJSONIssues(normalized);
+      if (repaired !== normalized) {
+        try {
+          return JSON.parse(repaired) as T;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+    }
+
+    throw (lastError instanceof Error ? lastError : new Error('JSON parse error'));
+  }
+
+  private buildJSONCandidates(text: string): string[] {
+    const trimmed = text.trim();
+    const candidates: string[] = [];
+
+    const pushCandidate = (value: string | undefined): void => {
+      const normalized = value?.trim();
+      if (!normalized || candidates.includes(normalized)) {
+        return;
+      }
+      candidates.push(normalized);
+    };
+
+    pushCandidate(trimmed);
+
+    // Collect all fenced blocks and prefer JSON-labeled blocks first.
+    const jsonFenced: string[] = [];
+    const genericFenced: string[] = [];
+    // Match fenced code blocks and capture an optional language tag plus the block contents.
+    const fencePattern = /```([a-zA-Z0-9_-]+)?\s*\n?([\s\S]*?)```/g;
+    let match: RegExpExecArray | null;
+    while ((match = fencePattern.exec(trimmed)) !== null) {
+      const language = (match[1] || '').toLowerCase();
+      const content = match[2]?.trim();
+      if (!content) {
+        continue;
+      }
+
+      if (language === 'json') {
+        jsonFenced.push(content);
+      } else {
+        genericFenced.push(content);
+      }
+    }
+
+    for (const block of jsonFenced) {
+      pushCandidate(block);
+    }
+    for (const block of genericFenced) {
+      pushCandidate(block);
+    }
+
+    // Also derive a balanced object slice so trailing guidance text does not break parsing.
+    const snapshot = candidates.slice();
+    for (const candidate of snapshot) {
+      pushCandidate(this.extractBalancedJSONObject(candidate));
+    }
+
+    return candidates;
+  }
+
+  private extractBalancedJSONObject(value: string): string | undefined {
+    const start = value.indexOf('{');
+    if (start === -1) {
+      return undefined;
+    }
+
+    // Track braces while honoring JSON strings/escapes to find the first complete object.
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < value.length; i++) {
+      const ch = value[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (inString) {
+        continue;
+      }
+
+      if (ch === '{') {
+        depth += 1;
+        continue;
+      }
+
+      if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return value.slice(start, i + 1);
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private repairCommonJSONIssues(input: string): string {
+    let result = input
+      .replace(/\uFEFF/g, '')
+      // Replace curly double quotes with straight quotes so JSON stays valid.
+      .replace(/[\u201C\u201D]/g, '"')
+      // Replace curly single quotes with straight apostrophes.
+      .replace(/[\u2018\u2019]/g, "'")
+      // Strip block comments that are valid in JSONC but not strict JSON.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // Strip line comments that are valid in JSONC but not strict JSON.
+      .replace(/(^|\s)\/\/.*$/gm, '')
+      // Remove trailing commas before closing objects or arrays.
+      .replace(/,\s*([}\]])/g, '$1');
+
+    // Best-effort recovery for a frequent model mistake: missing comma between values.
+    // We only insert where the parser error position is between two value-like tokens.
+    for (let i = 0; i < 4; i++) {
+      const position = this.getParseErrorPosition(result);
+      if (position === undefined || position <= 0 || position >= result.length) {
+        break;
+      }
+
+      const previous = this.findPreviousNonWhitespace(result, position - 1);
+      const current = this.findNextNonWhitespace(result, position);
+      if (previous === undefined || current === undefined) {
+        break;
+      }
+
+      // The previous character should look like the end of a JSON value.
+      const valueEnding = /[\]"0-9eElrtf}]/.test(previous);
+      // The next character should look like the start of a new JSON value.
+      const valueStarting = /[[{"\-0-9tfn]/.test(current);
+      if (!valueEnding || !valueStarting) {
+        break;
+      }
+
+      result = result.slice(0, position) + ',' + result.slice(position);
+    }
+
+    return result;
+  }
+
+  private getParseErrorPosition(text: string): number | undefined {
+    try {
+      JSON.parse(text);
+      return undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Extract the character offset from Node's JSON.parse error text.
+      const match = message.match(/position\s+(\d+)/i);
+      if (!match) {
+        return undefined;
+      }
+
+      const parsed = Number.parseInt(match[1], 10);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+  }
+
+  private findPreviousNonWhitespace(text: string, index: number): string | undefined {
+    for (let i = index; i >= 0; i--) {
+      // Skip past whitespace until we find the previous non-whitespace character.
+      if (!/\s/.test(text[i])) {
+        return text[i];
+      }
+    }
+    return undefined;
+  }
+
+  private findNextNonWhitespace(text: string, index: number): string | undefined {
+    for (let i = index; i < text.length; i++) {
+      // Skip past whitespace until we find the next non-whitespace character.
+      if (!/\s/.test(text[i])) {
+        return text[i];
+      }
+    }
+    return undefined;
   }
 
   private formatError(error: unknown): string {
@@ -580,6 +779,7 @@ If no conflicts found, return {"conflicts": []}`;
     }
 
     const text = doc.getText();
+    // Match standard markdown links and capture the visible label and target.
     const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
     const promptExtensions = ['.prompt.md', '.agent.md', '.instructions.md', 'SKILL.md'];
     const results: { target: string; content: string }[] = [];

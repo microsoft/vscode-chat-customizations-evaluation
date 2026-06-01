@@ -77,6 +77,35 @@ describe('LLMAnalyzer', () => {
       const result = extract('{"a": {"b": [1, 2, 3]}}');
       expect(result).toEqual({ a: { b: [1, 2, 3] } });
     });
+
+    it('should recover from missing commas between array elements', () => {
+      const malformed = `{
+        "issues": [
+          { "text": "first" }
+          { "text": "second" }
+        ]
+      }`;
+      const result = extract(malformed);
+      expect(result).toEqual({
+        issues: [{ text: 'first' }, { text: 'second' }],
+      });
+    });
+
+    it('should prefer balanced JSON object over trailing prose with braces', () => {
+      const result = extract('{"ok": true}\nNote: use {care} when editing files.');
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('should accept JSONC-style comments and trailing commas', () => {
+      const result = extract(`{
+        // comment
+        "items": [
+          1,
+          2,
+        ],
+      }`);
+      expect(result).toEqual({ items: [1, 2] });
+    });
   });
 
   describe('findTextRange', () => {
