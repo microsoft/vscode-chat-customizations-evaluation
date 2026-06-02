@@ -660,7 +660,7 @@ class WazaOrchestrator {
         }
 
         const runNow = 'Run Eval';
-        const alwaysRun = 'Always Run Evals After Implement suggestions';
+        const alwaysRun = 'Always Run Evals After Fix Diagnostics';
         const docs = 'Waza Docs';
         const action = await vscode.window.showInformationMessage(
             `Diagnostics were fixed for ${context.skillName}. Found existing eval at ${path.relative(context.workspaceRoot, evalPath)}. Run it now?`,

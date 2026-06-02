@@ -540,7 +540,7 @@ class ExtensionRuntime {
 
     this.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'nonFixableDiagnosticsOnly' });
     const action = await vscode.window.showInformationMessage(
-      'Implement suggestions is unavailable for LLM analysis error diagnostics. Run Analyze again.',
+      'Fix Diagnostics is unavailable for LLM analysis error diagnostics. Run Analyze again.',
       ACTION_ANALYZE_AGAIN,
     );
     if (action === ACTION_ANALYZE_AGAIN) {

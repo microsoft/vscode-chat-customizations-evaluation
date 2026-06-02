@@ -1,12 +1,12 @@
 # Analysis and Fix User Guide
 
-This guide explains how the extension analyzes customization files, how diagnostics are produced, and how the Implement suggestions flow applies improvements.
+This guide explains how the extension analyzes customization files, how diagnostics are produced, and how the Fix Diagnostics flow applies improvements.
 
 ## What This Covers
 
 - Manual analysis from the command palette and editor actions.
 - How LLM analysis categories map to diagnostics in Problems.
-- What happens when you run Implement suggestions.
+- What happens when you run Fix Diagnostics.
 - What happens after fixes are applied (optional waza eval flow).
 
 ## Supported Files
@@ -60,11 +60,11 @@ These diagnostics appear in the Problems panel and drive the editor action butto
 
 After analysis completes, diagnostics represent the analyzed snapshot. On the next content edit to that file, the extension marks results as stale and prompts the user to re-run analysis.
 
-## Implement suggestions Workflow
+## Fix Diagnostics Workflow
 
 Run:
 
-- Chat Customizations Evaluations: Implement suggestions
+- Chat Customizations Evaluations: Fix Diagnostics
 
 The fix flow works as follows:
 
@@ -102,5 +102,5 @@ This gives a tight loop: analyze -> fix -> validate.
 
 - Re-run analysis after any substantial edit; snapshot freshness is text-based.
 - Keep custom diagnostics specific and testable to improve fix quality.
-- Treat Implement suggestions as a targeted rewrite pass, not a full refactor pass.
+- Treat Fix Diagnostics as a targeted rewrite pass, not a full refactor pass.
 - Use waza evals to confirm behavior after applying fixes.

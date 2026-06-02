@@ -103,7 +103,7 @@
         "chatCustomizationsEvaluations.waza.alwaysRunAfterFixDiagnostics": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically run an existing waza eval after Implement suggestions applies improvements"
+          "description": "Automatically run an existing waza eval after Fix Diagnostics applies improvements"
         }
       }
     },
@@ -115,7 +115,7 @@
       },
       {
         "command": "chatCustomizationsEvaluations.fixDiagnostics",
-        "title": "Implement suggestions",
+        "title": "Fix Diagnostics",
         "category": "Chat Customizations Evaluations"
       },
       {

@@ -3,7 +3,7 @@ name: fix-customization-evaluation-diagnostics
 description: Fixes diagnostics reported by the Chat Customizations Evaluations extension on the active prompt file. Reads the current diagnostics from the editor and applies suggested improvements.
 ---
 
-# Implement suggestions
+# Fix Diagnostics
 
 ## Purpose
 
@@ -11,7 +11,7 @@ Fix issues found by the Chat Customizations Evaluations analyzer in prompt, agen
 
 ## Usage
 
-This skill is invoked automatically when the user clicks the "Implement suggestions" button in the editor title bar. It receives the diagnostics as context and rewrites the affected sections of the file to resolve them.
+This skill is invoked automatically when the user clicks the "Fix Diagnostics" button in the editor title bar. It receives the diagnostics as context and rewrites the affected sections of the file to resolve them.
 
 ## Instructions
 
