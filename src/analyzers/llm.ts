@@ -253,7 +253,6 @@ export class LLMAnalyzer {
     return {
       code: 'llm-error',
       message: `LLM analysis failed${phaseLabel}: ${this.formatError(error)}`,
-      severity: 'warning',
       range: LLMAnalyzer.EMPTY_RANGE,
       analyzer: 'llm-analyzer',
     };
@@ -266,7 +265,6 @@ export class LLMAnalyzer {
     return {
       code: 'llm-parse-error',
       message: `Analysis ran but couldn't parse results — try again. (${error instanceof Error ? error.message : 'JSON parse error'})`,
-      severity: 'info',
       range: LLMAnalyzer.EMPTY_RANGE,
       analyzer: 'llm-analyzer',
     };
@@ -298,7 +296,6 @@ export class LLMAnalyzer {
     return {
       code: diagnostic.code,
       message: diagnostic.message,
-      severity: diagnostic.severity,
       range,
       analyzer: diagnostic.analyzer,
       suggestion: diagnostic.suggestion,
@@ -336,7 +333,6 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
       "title": "Name of the custom diagnostic from the config",
       "description": "Specific issue found based on the custom diagnostic requirement",
       "relevant_text": "exact text from the prompt where the issue appears",
-      "severity": "error"|"warning"|"info",
       "suggestion": "Concrete rewrite or addition that resolves the issue"
     }
   ]`;
@@ -349,7 +345,6 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
       "title": "Short name for a high-confidence issue that does not fit existing categories",
       "description": "Specific issue found and why it is materially harmful",
       "relevant_text": "exact text from the prompt where the issue appears",
-      "severity": "error"|"warning"|"info",
       "suggestion": "Concrete rewrite or addition that resolves the issue"
     }
   ]`;
@@ -390,7 +385,6 @@ Respond with a single JSON object in this exact format:
     {
       "instruction1": "exact text from the prompt",
       "instruction2": "exact conflicting text from the prompt",
-      "severity": "error"|"warning",
       "explanation": "Concrete explanation of WHY these conflict and what wrong behavior the model would exhibit"
     }
   ],
@@ -398,7 +392,6 @@ Respond with a single JSON object in this exact format:
     {
       "text": "exact ambiguous text from the prompt",
       "type": "quantifier"|"reference"|"term"|"scope"|"other",
-      "severity": "warning"|"info",
       "problem": "What makes this ambiguous — describe the multiple interpretations a model could take",
       "suggestion": "A concrete rewrite that removes the ambiguity, e.g. replace 'a few' with '2-3'"
     }
@@ -409,7 +402,6 @@ Respond with a single JSON object in this exact format:
       "trait1": "first trait or tone",
       "trait2": "conflicting trait or tone",
       "relevant_text": "exact text from the prompt where this is most evident",
-      "severity": "warning"|"info",
       "suggestion": "How to make the persona consistent — pick one approach or reconcile them"
     }
   ],
@@ -419,7 +411,6 @@ Respond with a single JSON object in this exact format:
         "type": "nested-conditions"|"priority-conflict"|"deep-decision-tree"|"constraint-overload",
         "description": "What makes this hard for a model to follow and what mistakes it would likely make",
         "relevant_text": "exact text from the prompt causing the issue",
-        "severity": "warning"|"info",
         "suggestion": "How to restructure this — e.g. break into numbered steps, use a table, split into separate prompts"
       }
     ],
@@ -503,7 +494,6 @@ IMPORTANT:
       return [this.createDiagnostic(doc, {
         code: 'llm-disabled',
         message: 'LLM-powered analysis is disabled.',
-        severity: 'hint',
         analyzer: 'llm-analyzer',
         relevantText: '',
       })];
@@ -567,7 +557,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'contradiction',
         message: `Contradiction: "${c.instruction1}" conflicts with "${c.instruction2}". ${c.explanation}`,
-        severity: c.severity === 'error' ? 'error' : 'warning',
         analyzer: 'contradiction-detection',
         relevantText: c.instruction1,
       }));
@@ -576,7 +565,6 @@ IMPORTANT:
         results.push(this.createDiagnostic(doc, {
           code: 'contradiction-related',
           message: `Conflicts with line ${primaryRange.line + 1}: "${c.instruction1}". ${c.explanation}`,
-          severity: 'info',
           analyzer: 'contradiction-detection',
           relevantText: c.instruction2,
         }));
@@ -590,7 +578,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'ambiguity-llm',
         message: `Ambiguous: "${issue.text}". ${problem}Suggestion: ${issue.suggestion}`,
-        severity: issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'ambiguity-detection',
         suggestion: issue.suggestion,
         relevantText: issue.text,
@@ -603,7 +590,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'persona-inconsistency',
         message: `Persona conflict: ${issue.description}. The prompt sets "${issue.trait1}" but also "${issue.trait2}". Suggestion: ${issue.suggestion}`,
-        severity: issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'persona-consistency',
         suggestion: issue.suggestion,
         relevantText: issue.relevant_text,
@@ -619,7 +605,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'high-complexity',
         message: `Very high cognitive load detected. This prompt may overwhelm the model's attention. Consider breaking it into simpler, focused prompts.`,
-        severity: 'warning',
         analyzer: 'cognitive-load',
         wholeDocument: true,
       }));
@@ -629,7 +614,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: `cognitive-${issue.type}`,
         message: `Cognitive load (${issue.type}): ${issue.description}. Suggestion: ${issue.suggestion}`,
-        severity: issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'cognitive-load',
         suggestion: issue.suggestion,
         relevantText: issue.relevant_text,
@@ -645,7 +629,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'limited-coverage',
         message: `Semantic coverage is ${analysis.overall_coverage}. This prompt may produce inconsistent results for edge cases.`,
-        severity: 'warning',
         analyzer: 'semantic-coverage',
         wholeDocument: true,
       }));
@@ -655,7 +638,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'coverage-gap',
         message: `Coverage gap: ${gap.gap}. Suggestion: ${gap.suggestion}`,
-        severity: gap.impact === 'high' ? 'warning' : 'info',
         analyzer: 'semantic-coverage',
         suggestion: gap.suggestion,
         relevantText: gap.relevant_text,
@@ -666,7 +648,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'missing-error-handling',
         message: `Missing error handling: ${err.scenario}. Suggestion: ${err.suggestion}`,
-        severity: 'info',
         analyzer: 'semantic-coverage',
         suggestion: err.suggestion,
         relevantText: err.relevant_text,
@@ -682,7 +663,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'custom-diagnostic',
         message: `Custom diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
-        severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'custom-diagnostics',
         suggestion: issue.suggestion,
         relevantText,
@@ -698,7 +678,6 @@ IMPORTANT:
       results.push(this.createDiagnostic(doc, {
         code: 'llm-free-diagnostic',
         message: `Additional diagnostic (${issue.title}): ${issue.description}.${suggestion}`,
-        severity: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
         analyzer: 'llm-analyzer',
         suggestion: issue.suggestion,
         relevantText,
@@ -737,7 +716,6 @@ Respond in JSON format:
       "summary": "short description",
       "instruction1": "exact text from one file",
       "instruction2": "exact text from another file",
-      "severity": "error" | "warning",
       "suggestion": "how to resolve"
     }
   ]
@@ -754,7 +732,6 @@ If no conflicts found, return {"conflicts": []}`;
         results.push(this.createDiagnostic(doc, {
           code: 'composition-conflict',
           message: `Composition conflict: ${conflict.summary}. "${conflict.instruction1}" vs "${conflict.instruction2}"`,
-          severity: conflict.severity === 'error' ? 'error' : 'warning',
           analyzer: 'composition-conflicts',
           suggestion: conflict.suggestion,
           relevantText: conflict.instruction1,
