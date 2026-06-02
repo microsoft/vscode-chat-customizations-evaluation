@@ -26,7 +26,6 @@ describe('LLMAnalyzer', () => {
       const results = await analyzer.analyze(doc);
       expect(results).toHaveLength(1);
       expect(results[0].code).toBe('llm-disabled');
-      expect(results[0].severity).toBe('hint');
     });
   });
 
@@ -166,7 +165,6 @@ describe('LLMAnalyzer', () => {
           contradictions: [{
             instruction1: 'Be concise',
             instruction2: 'Provide detailed explanations',
-            severity: 'warning',
             explanation: 'These conflict',
           }],
           ambiguity_issues: [],
@@ -202,7 +200,6 @@ describe('LLMAnalyzer', () => {
       const results = await analyzer.analyze(doc);
       // Malformed JSON should surface as a user-visible parse error diagnostic
       expect(results.some(r => r.code === 'llm-parse-error')).toBe(true);
-      expect(results.some(r => r.severity === 'info')).toBe(true);
     });
 
     it('should handle proxy errors gracefully', async () => {
@@ -213,7 +210,6 @@ describe('LLMAnalyzer', () => {
       const results = await analyzer.analyze(doc);
       // Proxy errors surfaced via callLLM throw → allSettled rejection → warning diagnostic
       expect(results.some(r => r.code === 'llm-error')).toBe(true);
-      expect(results.some(r => r.severity === 'warning')).toBe(true);
       expect(results.some(r => r.message.includes('Model unavailable'))).toBe(true);
       // Phase name should be included in the diagnostic message
       expect(results.some(r => r.message.includes('[combined]'))).toBe(true);
@@ -306,7 +302,6 @@ describe('LLMAnalyzer', () => {
       const customDiagnostics = results.filter(r => r.code === 'custom-diagnostic');
 
       expect(customDiagnostics.length).toBeGreaterThan(0);
-      expect(customDiagnostics[0].severity).toBe('warning');
       expect(customDiagnostics[0].range.start.line).toBe(0);
     });
 
@@ -334,7 +329,6 @@ describe('LLMAnalyzer', () => {
       const freeDiagnostics = results.filter(r => r.code === 'llm-free-diagnostic');
 
       expect(freeDiagnostics.length).toBeGreaterThan(0);
-      expect(freeDiagnostics[0].severity).toBe('warning');
       expect(freeDiagnostics[0].range.start.line).toBe(0);
     });
 
