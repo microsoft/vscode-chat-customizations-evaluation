@@ -4,7 +4,7 @@ This guide explains how to use waza from the Chat Customizations Evaluations ext
 
 ## What Is Waza?
 
-Waza is a CLI for evaluating AI customizations (skills, agents, prompts, and instructions) using structured eval suites.
+Waza is a CLI for evaluating AI SKILL file customizations using structured eval suites.
 
 With this extension, you can:
 - Create a starter eval scaffold for a customization.

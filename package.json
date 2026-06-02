@@ -126,13 +126,13 @@
       },
       {
         "command": "chatCustomizationsEvaluations.wazaCreateEval",
-        "title": "Create Waza Eval Scaffold",
+        "title": "Create Waza Eval Scaffold For SKILL File",
         "category": "Chat Customizations Evaluations",
         "icon": "$(new-file)"
       },
       {
         "command": "chatCustomizationsEvaluations.wazaRunEval",
-        "title": "Run Waza Evaluation",
+        "title": "Run Waza Evaluation For SKILL File",
         "category": "Chat Customizations Evaluations",
         "icon": "$(play)"
       },
