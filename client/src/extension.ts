@@ -102,6 +102,7 @@ class ExtensionRuntime {
       extensionContext: this.extensionContext,
       outputChannel: this.outputChannel,
       getCustomizationUri: (obj) => this.getCustomizationUri(obj),
+      requestLLM: async (request) => this.handleLLMProxyRequest(request),
       logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
       logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
     });

@@ -22,6 +22,9 @@ export type { SkillContext, TelemetryData } from './wazaTypes';
 
 class WazaOrchestrator {
     private static readonly WAZA_CREATE_TIMEOUT_MS = 30_000;
+    private static readonly MAX_PROMPT_SECTION_CHARS = 12_000;
+    private static readonly MAX_TASK_FILE_COUNT = 8;
+    private static readonly MAX_TASK_FILE_SIZE_BYTES = 80_000;
 
     private deps: WazaDependencies | undefined;
     private readonly wazaCommandExecutor: WazaCommandExecutor;
@@ -591,11 +594,11 @@ class WazaOrchestrator {
         this.appendWazaCommandOutput(result, outputChannel);
 
         if (result.exitCode !== 0) {
-            this.logAndNotifyWazaRunEvalFailure();
+            await this.handleWazaRunEvalFailure(context, evalPath, result);
             return;
         }
 
-        await this.handleWazaRunEvalSuccess(context, resultsFile);
+        await this.handleWazaRunEvalSuccess(context, evalPath, resultsFile);
     }
 
     private async createWazaResultsFilePath(globalStoragePath: string, skillName: string): Promise<string> {
@@ -615,13 +618,37 @@ class WazaOrchestrator {
         }
     }
 
-    private logAndNotifyWazaRunEvalFailure(): void {
-        const { logTelemetryUsage } = this.requireDeps();
+    private async handleWazaRunEvalFailure(context: SkillContext, evalPath: string, commandResult: CommandResult): Promise<void> {
+        const { outputChannel, logTelemetryUsage } = this.requireDeps();
+        const recommendationReportPath = await this.generatePostEvalRecommendation(
+            context,
+            evalPath,
+            undefined,
+            {
+                commandStdout: commandResult.stdout,
+                commandStderr: commandResult.stderr,
+                commandExitCode: commandResult.exitCode,
+            },
+        );
+
+        if (recommendationReportPath) {
+            outputChannel.appendLine(`[Waza] Recommendation report saved to: ${recommendationReportPath}`);
+            const action = await vscode.window.showErrorMessage(
+                'waza evaluation failed. A recommendation document was generated.',
+                'Open Recommendation',
+            );
+            if (action === 'Open Recommendation') {
+                const document = await vscode.workspace.openTextDocument(vscode.Uri.file(recommendationReportPath));
+                await vscode.window.showTextDocument(document, { preview: false });
+            }
+        } else {
+            void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
+        }
+
         logTelemetryUsage('waza/runEval/result', { outcome: 'failed' });
-        void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
     }
 
-    private async handleWazaRunEvalSuccess(context: SkillContext, resultsFile: string): Promise<void> {
+    private async handleWazaRunEvalSuccess(context: SkillContext, evalPath: string, resultsFile: string): Promise<void> {
         const { outputChannel, logTelemetryUsage } = this.requireDeps();
         const resultsFileExists = fs.existsSync(resultsFile);
 
@@ -651,6 +678,346 @@ class WazaOrchestrator {
             outcome: 'success',
             resultsFileCreated: true,
         });
+    }
+
+    private async generatePostEvalRecommendation(
+        context: SkillContext,
+        evalPath: string,
+        resultsFile: string | undefined,
+        failureContext?: {
+            commandStdout: string;
+            commandStderr: string;
+            commandExitCode: number;
+        },
+    ): Promise<string | undefined> {
+        const { extensionContext, outputChannel, requestLLM, logTelemetryUsage, logTelemetryError } = this.requireDeps();
+        logTelemetryUsage('waza/postEvalRecommendation/start');
+
+        try {
+            outputChannel.appendLine(`[Waza] Generating post-eval recommendation for ${context.skillName}...`);
+
+            const [skillContent, evalContent, taskFiles] = await Promise.all([
+                fs.promises.readFile(context.skillFilePath, 'utf8'),
+                fs.promises.readFile(evalPath, 'utf8'),
+                this.collectTaskFileContents(evalPath),
+            ]);
+
+            const resultsContent = await this.resolvePostEvalResultsContent(resultsFile, failureContext);
+
+            const systemPrompt = [
+                'You are an expert evaluator for VS Code chat customizations and waza eval suites.',
+                'Decide what should be updated next: task files, skill file, both, or neither.',
+                'Favor concrete, low-risk edits and reference evidence from eval results and file contents.',
+                'Respond in natural language markdown with concise sections and actionable next steps.',
+            ].join(' ');
+
+            const prompt = this.buildPostEvalRecommendationPrompt({
+                skillName: context.skillName,
+                skillPath: context.skillFilePath,
+                evalPath,
+                resultsPath: resultsFile ?? 'Unavailable (evaluation failed before results file was written)',
+                skillContent,
+                evalContent,
+                resultsContent,
+                taskFiles,
+                failureContext,
+            });
+
+            const llmResponse = await requestLLM({
+                uri: context.uri.toString(),
+                systemPrompt,
+                prompt,
+            });
+
+            if (llmResponse.error) {
+                outputChannel.appendLine(`[Waza] Post-eval recommendation failed: ${llmResponse.error}`);
+                logTelemetryUsage('waza/postEvalRecommendation/result', {
+                    outcome: 'failed',
+                    reason: 'llmError',
+                });
+                return undefined;
+            }
+
+            const recommendationText = this.normalizeRecommendationText(llmResponse.text);
+            if (!recommendationText) {
+                outputChannel.appendLine('[Waza] Post-eval recommendation returned empty output.');
+                logTelemetryUsage('waza/postEvalRecommendation/result', {
+                    outcome: 'failed',
+                    reason: 'emptyResponse',
+                });
+                return undefined;
+            }
+
+            const reportPath = await this.writeRecommendationReport(
+                extensionContext.globalStorageUri.fsPath,
+                context.skillName,
+                evalPath,
+                resultsFile,
+                recommendationText,
+            );
+
+            logTelemetryUsage('waza/postEvalRecommendation/result', {
+                outcome: 'success',
+                recommendationTextLength: recommendationText.length,
+            });
+
+            return reportPath;
+        } catch (error) {
+            logTelemetryError('waza/postEvalRecommendation/result', error, {
+                outcome: 'failed',
+                reason: 'exception',
+            });
+            outputChannel.appendLine(`[Waza] Post-eval recommendation crashed: ${error instanceof Error ? error.message : String(error)}`);
+            return undefined;
+        }
+    }
+
+    private async collectTaskFileContents(evalPath: string): Promise<Array<{ path: string; content: string }>> {
+        const evalRoot = path.dirname(evalPath);
+        const collected: Array<{ path: string; content: string }> = [];
+
+        const visit = async (dir: string): Promise<void> => {
+            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (collected.length >= WazaOrchestrator.MAX_TASK_FILE_COUNT) {
+                    return;
+                }
+
+                const entryPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    await visit(entryPath);
+                    continue;
+                }
+
+                if (path.resolve(entryPath) === path.resolve(evalPath)) {
+                    continue;
+                }
+
+                const stat = await fs.promises.stat(entryPath);
+                if (stat.size > WazaOrchestrator.MAX_TASK_FILE_SIZE_BYTES) {
+                    continue;
+                }
+
+                const content = await fs.promises.readFile(entryPath, 'utf8');
+                collected.push({ path: entryPath, content });
+            }
+        };
+
+        await visit(evalRoot);
+        return collected;
+    }
+
+    private buildPostEvalRecommendationPrompt(input: {
+        skillName: string;
+        skillPath: string;
+        evalPath: string;
+        resultsPath: string;
+        skillContent: string;
+        evalContent: string;
+        resultsContent: string;
+        taskFiles: Array<{ path: string; content: string }>;
+        failureContext?: {
+            commandStdout: string;
+            commandStderr: string;
+            commandExitCode: number;
+        };
+    }): string {
+        const taskFilesBlock = input.taskFiles.length === 0
+            ? 'No task files were found near eval.yaml.'
+            : input.taskFiles
+                .map((file) => [
+                    `### Task File: ${file.path}`,
+                    this.truncateForPrompt(file.content),
+                ].join('\n'))
+                .join('\n\n');
+
+        return [
+            `Skill name: ${input.skillName}`,
+            `Skill file: ${input.skillPath}`,
+            `Eval file: ${input.evalPath}`,
+            `Results file: ${input.resultsPath}`,
+            '',
+            'Analyze the evaluation output and determine the best next action.',
+            'Focus on whether failures are caused mainly by weak or misaligned eval tasks versus issues in the skill behavior/specification.',
+            input.failureContext
+                ? 'This run FAILED. Prioritize the root cause of failure in stderr/stdout and explain whether to fix eval task files or skill instructions first.'
+                : 'This run SUCCEEDED. Focus on quality improvements based on result evidence.',
+            '',
+            'Output format requirements (natural text, not JSON):',
+            '- Start with a clear recommendation: Change task files / Change skill file / Both / Neither.',
+            '- Explain why with evidence from eval output and file contents.',
+            '- Provide concrete edits for task files (if any).',
+            '- Provide concrete edits for skill file (if any).',
+            '- End with a short ordered list of first steps.',
+            '',
+            '### Waza Results',
+            this.truncateForPrompt(input.resultsContent),
+            ...(input.failureContext
+                ? [
+                    '',
+                    '### Waza Command Failure Context',
+                    `Exit code: ${input.failureContext.commandExitCode}`,
+                    '',
+                    'STDERR:',
+                    this.truncateForPrompt(input.failureContext.commandStderr || '(empty)'),
+                    '',
+                    'STDOUT:',
+                    this.truncateForPrompt(input.failureContext.commandStdout || '(empty)'),
+                ]
+                : []),
+            '',
+            '### Eval Framework (eval.yaml)',
+            this.truncateForPrompt(input.evalContent),
+            '',
+            '### Skill File (SKILL.md)',
+            this.truncateForPrompt(input.skillContent),
+            '',
+            '### Task Files',
+            taskFilesBlock,
+        ].join('\n');
+    }
+
+    private truncateForPrompt(text: string): string {
+        if (text.length <= WazaOrchestrator.MAX_PROMPT_SECTION_CHARS) {
+            return text;
+        }
+
+        const head = text.slice(0, Math.floor(WazaOrchestrator.MAX_PROMPT_SECTION_CHARS * 0.8));
+        const tail = text.slice(-Math.floor(WazaOrchestrator.MAX_PROMPT_SECTION_CHARS * 0.2));
+        return `${head}\n\n...[truncated ${text.length - head.length - tail.length} chars]...\n\n${tail}`;
+    }
+
+    private normalizeRecommendationText(rawText: string): string | undefined {
+        const trimmed = rawText.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        const fencedMatch = trimmed.match(/^```(?:markdown|md|text|json)?\s*([\s\S]*?)\s*```$/i);
+        const candidate = (fencedMatch?.[1] ?? trimmed).trim();
+        if (!candidate) {
+            return undefined;
+        }
+
+        // If the model still returns JSON, convert it to readable prose.
+        try {
+            const parsed = JSON.parse(candidate) as {
+                recommendation?: string;
+                confidence?: number;
+                evidence?: string[];
+                task_file_changes?: string[];
+                skill_file_changes?: string[];
+                first_steps?: string[];
+            };
+
+            if (parsed && typeof parsed === 'object') {
+                const lines: string[] = [];
+                lines.push('## Recommendation');
+                lines.push(parsed.recommendation
+                    ? `Recommendation: ${parsed.recommendation}`
+                    : 'Recommendation: unknown');
+
+                if (typeof parsed.confidence === 'number') {
+                    lines.push(`Confidence: ${parsed.confidence}`);
+                }
+
+                if (Array.isArray(parsed.evidence) && parsed.evidence.length > 0) {
+                    lines.push('');
+                    lines.push('## Evidence');
+                    for (const item of parsed.evidence) {
+                        lines.push(`- ${item}`);
+                    }
+                }
+
+                if (Array.isArray(parsed.task_file_changes) && parsed.task_file_changes.length > 0) {
+                    lines.push('');
+                    lines.push('## Task File Changes');
+                    for (const item of parsed.task_file_changes) {
+                        lines.push(`- ${item}`);
+                    }
+                }
+
+                if (Array.isArray(parsed.skill_file_changes) && parsed.skill_file_changes.length > 0) {
+                    lines.push('');
+                    lines.push('## Skill File Changes');
+                    for (const item of parsed.skill_file_changes) {
+                        lines.push(`- ${item}`);
+                    }
+                }
+
+                if (Array.isArray(parsed.first_steps) && parsed.first_steps.length > 0) {
+                    lines.push('');
+                    lines.push('## First Steps');
+                    for (const [index, item] of parsed.first_steps.entries()) {
+                        lines.push(`${index + 1}. ${item}`);
+                    }
+                }
+
+                return lines.join('\n');
+            }
+        } catch {
+            // Keep natural text as-is.
+        }
+
+        return candidate;
+    }
+
+    private async resolvePostEvalResultsContent(
+        resultsFile: string | undefined,
+        failureContext?: {
+            commandStdout: string;
+            commandStderr: string;
+            commandExitCode: number;
+        },
+    ): Promise<string> {
+        if (resultsFile && fs.existsSync(resultsFile)) {
+            return fs.promises.readFile(resultsFile, 'utf8');
+        }
+
+        if (!failureContext) {
+            return 'No results content available.';
+        }
+
+        return [
+            'Evaluation command failed before a results file was available.',
+            `Exit code: ${failureContext.commandExitCode}`,
+            '',
+            'STDERR:',
+            failureContext.commandStderr || '(empty)',
+            '',
+            'STDOUT:',
+            failureContext.commandStdout || '(empty)',
+        ].join('\n');
+    }
+
+    private async writeRecommendationReport(
+        globalStoragePath: string,
+        skillName: string,
+        evalPath: string,
+        resultsFile: string | undefined,
+        recommendationText: string,
+    ): Promise<string> {
+        const recommendationsDir = path.join(globalStoragePath, 'recommendations');
+        await fs.promises.mkdir(recommendationsDir, { recursive: true });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const reportPath = path.join(recommendationsDir, `${skillName}-${timestamp}.md`);
+
+        const report = [
+            `# Waza Post-Eval Recommendation (${skillName})`,
+            '',
+            `- Eval file: ${evalPath}`,
+            `- Results file: ${resultsFile ?? 'Unavailable (evaluation failed before results were written)'}`,
+            `- Generated at: ${new Date().toISOString()}`,
+            '',
+            '## Recommendation',
+            recommendationText,
+            '',
+            'Interpretation tip: If the recommendation is to change task files, update eval task definitions before editing the skill. If it recommends changing the skill file, prioritize SKILL.md behavior/instructions updates first.',
+        ].join('\n');
+
+        await fs.promises.writeFile(reportPath, report, 'utf8');
+        return reportPath;
     }
 
     private async handleExistingEvalAfterFix(context: SkillContext, evalPath: string): Promise<void> {
