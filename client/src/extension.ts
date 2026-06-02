@@ -340,26 +340,26 @@ class ExtensionRuntime {
 
   private registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
-      vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async () => this.handleAnalyzePromptCommand()),
+      vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.handleAnalyzePromptCommand(obj)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async () => this.handleFixDiagnosticsCommand()),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),
     );
   }
 
-  private async handleAnalyzePromptCommand(): Promise<void> {
+  private async handleAnalyzePromptCommand(obj?: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePrompt', { source: 'activeEditor' });
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
+    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    if (!uri) {
       this.logTelemetryUsage('command/analyzePrompt/result', { outcome: 'noActiveEditor' });
       return;
     }
-    if (this.analysisCoordinator?.isAnalysisPending(editor.document.uri)) {
+    if (this.analysisCoordinator?.isAnalysisPending(uri)) {
       this.logTelemetryUsage('command/analyzePrompt/result', { outcome: 'alreadyRunning' });
       return;
     }
 
     await this.runAnalyzeWorkflow({
-      uri: editor.document.uri,
+      uri,
       resultEventName: 'command/analyzePrompt/result',
       revealDocumentAfterSuccess: false,
     });
