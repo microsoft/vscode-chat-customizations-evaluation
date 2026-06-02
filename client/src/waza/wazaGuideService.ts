@@ -12,20 +12,25 @@ export class WazaGuideService {
 
     async openGuide(fileName: string, fallbackContent: string, missingGuideLogLine: string): Promise<void> {
         const guidePath = this.resolveGuidePath(fileName);
-        let document: vscode.TextDocument;
+        let guideUri: vscode.Uri;
 
         if (guidePath) {
-            const guideUri = vscode.Uri.file(guidePath);
-            document = await vscode.workspace.openTextDocument(guideUri);
+            guideUri = vscode.Uri.file(guidePath);
         } else {
             this.outputChannel.appendLine(missingGuideLogLine);
-            document = await vscode.workspace.openTextDocument({
-                content: fallbackContent,
-                language: 'markdown',
-            });
+            guideUri = await this.writeFallbackGuide(fileName, fallbackContent);
         }
 
-        await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+        await vscode.commands.executeCommand('markdown.showPreview', guideUri);
+    }
+
+    private async writeFallbackGuide(fileName: string, fallbackContent: string): Promise<vscode.Uri> {
+        const fallbackGuideDirectory = vscode.Uri.joinPath(this.extensionContext.globalStorageUri, 'fallback-guides');
+        await vscode.workspace.fs.createDirectory(fallbackGuideDirectory);
+
+        const fallbackGuideUri = vscode.Uri.joinPath(fallbackGuideDirectory, fileName);
+        await vscode.workspace.fs.writeFile(fallbackGuideUri, Buffer.from(fallbackContent, 'utf8'));
+        return fallbackGuideUri;
     }
 
     private resolveGuidePath(fileName: string): string | undefined {
