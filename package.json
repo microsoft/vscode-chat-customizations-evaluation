@@ -185,7 +185,7 @@
         {
           "command": "chatCustomizationsEvaluations.wazaRunEvalFromFile",
           "group": "inline",
-          "when": "resourceFilename == eval.yaml"
+          "when": "resourceFilename == wazaEval.yaml"
         }
       ],
       "chat/customizations/item": [
@@ -213,7 +213,7 @@
     ],
     "yamlValidation": [
       {
-        "fileMatch": "eval.yaml",
+        "fileMatch": "**/{eval,wazaEval}.yaml",
         "url": "https://raw.githubusercontent.com/microsoft/waza/refs/heads/main/schemas/eval.schema.json"
       }
     ]

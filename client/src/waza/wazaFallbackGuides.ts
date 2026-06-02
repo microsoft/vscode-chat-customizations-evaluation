@@ -29,7 +29,7 @@ With this extension, you can:
 
 ## Run Command Used By Extension
 
-\`waza run <eval.yaml> --context-dir <skill-dir> --output <results-file.json>\`
+\`waza run <wazaEval.yaml> --context-dir <skill-dir> --output <results-file.json>\`
 
 ## Grader Types (From Waza Docs)
 
@@ -208,7 +208,7 @@ Examples:
 
 ## References
 
-### eval.yaml pseudo structure
+### wazaEval.yaml pseudo structure
 
 \`\`\`yaml
 name: my-skill-eval
@@ -238,7 +238,7 @@ tasks:
   - "tasks/*.yaml"
 \`\`\`
 
-### eval.yaml possible fields
+### wazaEval.yaml possible fields
 
 - \`name\`: Eval suite name shown in results.
 - \`description\`: Human-readable purpose of this eval.

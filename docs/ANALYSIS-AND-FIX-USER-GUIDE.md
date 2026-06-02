@@ -85,7 +85,7 @@ The fix skill is instructed to:
 
 If fixes were applied and the file belongs to a skill context:
 
-1. The extension looks for an `eval.yaml`.
+1. The extension looks for a waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support).
 2. If found, it can run waza eval immediately (or persist an always-run preference).
 3. If missing, it offers to scaffold evals and optionally run them.
 

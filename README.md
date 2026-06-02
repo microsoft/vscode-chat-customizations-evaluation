@@ -18,7 +18,7 @@ An extension for analyzing and improving AI prompt files. Works with `.prompt.md
 ### Waza Integration
 
 - **Create Eval Scaffold** — Generates eval files for a skill via `waza new eval <skill-name>`
-- **Run Evaluation** — Executes skill evaluation via `waza run <eval.yaml> --context-dir <skill-dir>`
+- **Run Evaluation** — Executes skill evaluation via `waza run <wazaEval.yaml> --context-dir <skill-dir>`
 - **Automatic Local Fallback** — If `waza` is not on `PATH`, commands attempt a local fallback via `go run ./cmd/waza` when a sibling `waza` repo is available
 
 ### Editor Integration
@@ -48,7 +48,7 @@ LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to
 | Command | Description |
 |---------|-------------|
 | `Chat Customizations Evaluations: Analyze Prompt` | Run full LLM-powered analysis on the active file |
-| `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `eval.yaml` and task files for the active skill |
+| `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `wazaEval.yaml` and task files for the active skill |
 | `Chat Customizations Evaluations: Run Waza Evaluation` | Run the skill's eval suite |
 | `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific waza binary and configure the extension to use it |
 | `Chat Customizations Evaluations: Open Analysis and Fix User Guide` | Open the analysis and fix workflow guide |

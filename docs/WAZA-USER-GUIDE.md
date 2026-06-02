@@ -47,12 +47,12 @@ When you run "Run Waza Evaluation", the extension does the following:
 1. Resolves context from the active customization:
    - Finds the nearest SKILL.md.
    - Determines skill name and workspace root.
-2. Searches for an eval file (`eval.yaml`) in common locations.
+2. Searches for a waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support) in common locations.
 3. Creates a timestamped results output file path in extension storage.
 4. Runs waza:
 
 ```bash
-waza run <eval.yaml> --context-dir <skill-dir> --output <results-file.json>
+waza run <wazaEval.yaml> --context-dir <skill-dir> --output <results-file.json>
 ```
 
 5. Streams stdout and stderr to the output channel.
@@ -235,11 +235,11 @@ Examples:
       threshold: 0.6
 ```
 
-You can mix global graders in `eval.yaml` with task-specific graders in each task file.
+You can mix global graders in `wazaEval.yaml` with task-specific graders in each task file.
 
 ## References
 
-### eval.yaml pseudo structure
+### wazaEval.yaml pseudo structure
 
 ```yaml
 name: my-skill-eval
@@ -275,7 +275,7 @@ tasks:
    - "tasks/*.yaml"
 ```
 
-### eval.yaml possible fields
+### wazaEval.yaml possible fields
 
 | Field | Required | Description |
 |---|---|---|
@@ -375,7 +375,7 @@ graders:
 | `graders[].config` | No | Type-specific grader configuration for this task only. |
 | `hooks` | No | Per-task pre/post execution commands where supported. |
 
-Tip: Put reusable checks in top-level `graders` in `eval.yaml` and task-specific checks in each task file.
+Tip: Put reusable checks in top-level `graders` in `wazaEval.yaml` and task-specific checks in each task file.
 
 ## Results File Location
 
@@ -398,7 +398,7 @@ Examples:
 
 ## Troubleshooting
 
-### "No eval.yaml found"
+### "No waza eval file found"
 
 Create an eval scaffold first with:
 - Chat Customizations Evaluations: Create Waza Eval Scaffold

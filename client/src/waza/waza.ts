@@ -22,6 +22,12 @@ export type { SkillContext, TelemetryData } from './wazaTypes';
 
 class WazaOrchestrator {
     private static readonly WAZA_CREATE_TIMEOUT_MS = 30_000;
+    private static readonly PREFERRED_EVAL_FILE_NAME = 'wazaEval.yaml';
+    private static readonly LEGACY_EVAL_FILE_NAME = 'eval.yaml';
+    private static readonly SUPPORTED_EVAL_FILE_NAMES = [
+        WazaOrchestrator.PREFERRED_EVAL_FILE_NAME,
+        WazaOrchestrator.LEGACY_EVAL_FILE_NAME,
+    ];
 
     private deps: WazaDependencies | undefined;
     private readonly wazaCommandExecutor: WazaCommandExecutor;
@@ -108,7 +114,7 @@ class WazaOrchestrator {
         if (!evalPath) {
             logTelemetryUsage('command/wazaRunEval/result', { outcome: 'missingEval' });
             const action = await vscode.window.showWarningMessage(
-                `No eval.yaml found for ${skillContext.skillName}.`,
+                `No waza eval file found for ${skillContext.skillName}.`,
                 'Create Eval'
             );
 
@@ -129,12 +135,12 @@ class WazaOrchestrator {
         outputChannel.appendLine(`[Waza] Editor: ${editor ? 'exists' : 'null'}`);
         if (editor) {
             outputChannel.appendLine(`[Waza] Document fileName: ${editor.document.fileName}`);
-            outputChannel.appendLine(`[Waza] Ends with eval.yaml: ${editor.document.fileName.endsWith('eval.yaml')}`);
+            outputChannel.appendLine(`[Waza] Supported eval file: ${this.isSupportedEvalFile(editor.document.fileName)}`);
         }
 
-        if (!editor || !editor.document.fileName.endsWith('eval.yaml')) {
+        if (!editor || !this.isSupportedEvalFile(editor.document.fileName)) {
             logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'invalidActiveFile' });
-            void vscode.window.showWarningMessage('This command requires an eval.yaml file to be active.');
+            void vscode.window.showWarningMessage('This command requires a waza eval file to be active.');
             return;
         }
 
@@ -147,7 +153,7 @@ class WazaOrchestrator {
         if (!skillFilePath) {
             outputChannel.appendLine('[Waza] Could not find SKILL.md');
             logTelemetryUsage('command/wazaRunEvalFromFile/result', { outcome: 'missingSkillFile' });
-            void vscode.window.showWarningMessage('Could not find SKILL.md associated with this eval.yaml file.');
+            void vscode.window.showWarningMessage('Could not find SKILL.md associated with this waza eval file.');
             return;
         }
 
@@ -346,18 +352,24 @@ class WazaOrchestrator {
         const { outputChannel } = this.requireDeps();
         const candidates = new Set<string>();
 
-        candidates.add(path.join(context.workspaceRoot, 'evals', context.skillName, 'eval.yaml'));
+        const addEvalCandidates = (basePath: string): void => {
+            for (const evalFileName of WazaOrchestrator.SUPPORTED_EVAL_FILE_NAMES) {
+                candidates.add(path.join(basePath, evalFileName));
+            }
+        };
+
+        addEvalCandidates(path.join(context.workspaceRoot, 'evals', context.skillName));
 
         const skillsDir = path.dirname(context.skillDirPath);
         if (path.basename(skillsDir) === 'skills') {
             const projectRoot = path.dirname(skillsDir);
-            candidates.add(path.join(projectRoot, 'evals', context.skillName, 'eval.yaml'));
+            addEvalCandidates(path.join(projectRoot, 'evals', context.skillName));
         }
 
         let current = context.skillDirPath;
         while (true) {
-            candidates.add(path.join(current, 'evals', context.skillName, 'eval.yaml'));
-            candidates.add(path.join(current, 'evals', 'eval.yaml'));
+            addEvalCandidates(path.join(current, 'evals', context.skillName));
+            addEvalCandidates(path.join(current, 'evals'));
 
             const parent = path.dirname(current);
             if (parent === current) {
@@ -366,10 +378,10 @@ class WazaOrchestrator {
             current = parent;
         }
 
-        candidates.add(path.join(context.skillDirPath, 'evals', 'eval.yaml'));
-        candidates.add(path.join(context.skillDirPath, 'eval.yaml'));
+        addEvalCandidates(path.join(context.skillDirPath, 'evals'));
+        addEvalCandidates(context.skillDirPath);
 
-        outputChannel.appendLine(`[Waza] Looking for eval.yaml for ${context.skillName}`);
+        outputChannel.appendLine(`[Waza] Looking for waza eval file for ${context.skillName}`);
         for (const candidate of candidates) {
             outputChannel.appendLine(`[Waza] Eval candidate: ${candidate}`);
             if (fs.existsSync(candidate)) {
@@ -402,7 +414,7 @@ class WazaOrchestrator {
 
         const tempRoot = await fs.promises.mkdtemp(path.join(tempBase, 'waza-'));
         const tempSkillDir = path.join(tempRoot, 'skills', context.skillName);
-        const targetEvalPath = path.join(scaffoldRoot, 'evals', context.skillName, 'eval.yaml');
+        const targetEvalPath = path.join(scaffoldRoot, 'evals', context.skillName, WazaOrchestrator.PREFERRED_EVAL_FILE_NAME);
 
         try {
             await fs.promises.mkdir(tempSkillDir, { recursive: true });
@@ -689,7 +701,7 @@ class WazaOrchestrator {
         const create = 'Create Evals';
         const docs = 'Waza Docs';
         const action = await vscode.window.showInformationMessage(
-            `Diagnostics were fixed for ${context.skillName}. No eval.yaml found. Create evals powered by waza now? You can also run the "Create Waza Eval Scaffold" command later.`,
+            `Diagnostics were fixed for ${context.skillName}. No waza eval file found. Create evals powered by waza now? You can also run the "Create Waza Eval Scaffold" command later.`,
             create,
             docs,
         );
@@ -872,6 +884,11 @@ class WazaOrchestrator {
 
         files.sort();
         return files;
+    }
+
+    private isSupportedEvalFile(filePath: string): boolean {
+        const fileName = path.basename(filePath);
+        return WazaOrchestrator.SUPPORTED_EVAL_FILE_NAMES.includes(fileName);
     }
 }
 
