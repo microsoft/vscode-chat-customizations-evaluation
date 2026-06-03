@@ -654,7 +654,13 @@ class WazaOrchestrator {
                 await vscode.window.showTextDocument(document, { preview: false });
             }
         } else {
-            void vscode.window.showErrorMessage('waza evaluation failed. See "Chat Customizations Evaluations" output for details.');
+            const action = await vscode.window.showErrorMessage(
+                'waza evaluation failed. See "Chat Customizations Evaluations" output for details.',
+                'Show Output',
+            );
+            if (action === 'Show Output') {
+                outputChannel.show(true);
+            }
         }
 
         logTelemetryUsage('waza/runEval/result', { outcome: 'failed' });
