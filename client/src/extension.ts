@@ -139,6 +139,10 @@ class ExtensionRuntime {
         { scheme: 'file', language: 'skill' },
         { scheme: 'file', language: 'instructions' },
         { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
+        { scheme: 'vscode-userdata', language: 'prompt' },
+        { scheme: 'vscode-userdata', language: 'chatagent' },
+        { scheme: 'vscode-userdata', language: 'skill' },
+        { scheme: 'vscode-userdata', language: 'instructions' },
       ],
       synchronize: {
         fileEvents: [
