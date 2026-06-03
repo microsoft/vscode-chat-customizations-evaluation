@@ -2,6 +2,8 @@
 
 This guide explains how to use waza from the Chat Customizations Evaluations extension.
 
+If you want deeper details on waza itself (schemas, graders, roadmap, releases), see: https://github.com/microsoft/waza
+
 ## What Is Waza?
 
 Waza is a CLI for evaluating AI SKILL file customizations using structured eval suites.
@@ -14,39 +16,51 @@ With this extension, you can:
 
 ## Prerequisites
 
-- VS Code with the Chat Customizations Evaluations extension installed.
+- VS Code with the Chat Customizations Evaluations extension installed:
+   - Marketplace: https://marketplace.visualstudio.com/items?itemName=ms-vscode.vscode-chat-customizations-evaluations
+   - Extension ID: `ms-vscode.vscode-chat-customizations-evaluations`
 - A customization file in your workspace (for example, SKILL.md).
 - A working waza command.
+
+How to verify your waza command is working:
+1. Check your configured command in setting `chatCustomizationsEvaluations.waza.command` (default: `waza`).
+2. In a terminal, run `waza --version` (or run the configured command with `--version`).
+3. If it is missing, run VS Code command `Chat Customizations Evaluations: Download Waza Binary` and try again.
 
 The extension tries these options in order:
 1. The configured command from setting `chatCustomizationsEvaluations.waza.command`.
 2. A binary downloaded by the extension.
 3. A local fallback using `go run ./cmd/waza` if a local waza repo is detected.
 
+## Typical End-User Flow
+
+1. Open a customization file (for example, `skills/my-skill/SKILL.md`).
+2. Run the VS Code command `Chat Customizations Evaluations: Create Waza Eval Scaffold` (or `Create Waza Eval Scaffold For SKILL File`, depending on build).
+3. Review generated eval files and tasks.
+4. Run the VS Code command `Chat Customizations Evaluations: Run Waza Evaluation` (or `Run Waza Evaluation For SKILL File`, depending on build).
+5. Open results from the notification action or from the output panel link.
+
 ## Main Commands (Command Palette)
 
 Open the Command Palette and run these commands:
 
-- Chat Customizations Evaluations: Open Waza User Guide
-- Chat Customizations Evaluations: Download Waza Binary
-- Chat Customizations Evaluations: Create Waza Eval Scaffold
-- Chat Customizations Evaluations: Run Waza Evaluation
-
-## Typical End-User Flow
-
-1. Open a customization file (for example, `skills/my-skill/SKILL.md`).
-2. Run Create Waza Eval Scaffold.
-3. Review generated eval files and tasks.
-4. Run Waza Evaluation.
-5. Open results from the notification action or from the output panel link.
+- `Chat Customizations Evaluations: Open Waza User Guide`
+   - Use when you want a quick reference for eval setup, run flow, and graders.
+- `Chat Customizations Evaluations: Download Waza Binary`
+   - Use when waza is not on your PATH, or you want the extension to use a managed binary.
+- `Chat Customizations Evaluations: Create Waza Eval Scaffold` (or `Create Waza Eval Scaffold For SKILL File`)
+   - Use to generate starter eval files (`wazaEval.yaml` plus starter tasks) for the current skill/customization context.
+- `Chat Customizations Evaluations: Run Waza Evaluation` (or `Run Waza Evaluation For SKILL File`)
+   - Use to run the resolved eval suite and write a timestamped JSON results file.
 
 ## How Evaluation Works
 
 When you run "Run Waza Evaluation", the extension does the following:
 
 1. Resolves context from the active customization:
-   - Finds the nearest SKILL.md.
-   - Determines skill name and workspace root.
+    - Finds the nearest supported customization context and resolves the related skill context.
+    - In practice, this is anchored to the nearest `SKILL.md` discovered from the current file/context.
+    - Determines skill name and workspace root.
 2. Searches for a waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support) in common locations.
 3. Creates a timestamped results output file path in extension storage.
 4. Runs waza:
@@ -84,6 +98,10 @@ Based on `waza/docs/graders`, the documented grader types are:
 - `trigger`
 
 For current runs, use implemented grader types. If you use one marked "not implemented", waza will fail to create or run that grader.
+
+About availability plans for "not implemented" grader types:
+- This extension does not define a release timeline for those grader implementations.
+- For updates, track the waza repository releases/issues: https://github.com/microsoft/waza
 
 Examples:
 
@@ -397,6 +415,8 @@ Examples:
 - `C:\\tools\\waza.exe`
 
 ## Troubleshooting
+
+If you still need deeper waza details, examples, or status updates, see https://github.com/microsoft/waza
 
 ### "No waza eval file found"
 
