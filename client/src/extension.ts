@@ -554,6 +554,7 @@ class ExtensionRuntime {
   private async openFixDiagnosticsChat(document: vscode.TextDocument, diagnostics: vscode.Diagnostic[]): Promise<void> {
     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
     const query = this.buildFixDiagnosticsChatQuery(document, diagnostics);
+    await vscode.commands.executeCommand('workbench.action.chat.newChat');
     await vscode.commands.executeCommand('workbench.action.chat.open', {
       query,
       isPartialQuery: false,
