@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LLMAnalyzer } from '../analyzers/llm';
+import { extractJSON, findTextRange } from '../analyzers/llm-utils';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 describe('LLMAnalyzer', () => {
@@ -30,50 +31,47 @@ describe('LLMAnalyzer', () => {
   });
 
   describe('extractJSON', () => {
-    // Access private method for direct testing
-    const extract = (text: string) => (analyzer as any).extractJSON(text);
-
     it('should parse plain JSON', () => {
-      const result = extract('{"issues": []}');
+      const result = extractJSON('{"issues": []}');
       expect(result).toEqual({ issues: [] });
     });
 
     it('should parse code-fenced JSON with language tag', () => {
-      const result = extract('```json\n{"issues": []}\n```');
+      const result = extractJSON('```json\n{"issues": []}\n```');
       expect(result).toEqual({ issues: [] });
     });
 
     it('should parse code-fenced JSON without language tag', () => {
-      const result = extract('```\n{"key": "value"}\n```');
+      const result = extractJSON('```\n{"key": "value"}\n```');
       expect(result).toEqual({ key: 'value' });
     });
 
     it('should throw on invalid JSON', () => {
-      expect(() => extract('not json at all')).toThrow();
+      expect(() => extractJSON('not json at all')).toThrow();
     });
 
     it('should handle JSON with surrounding whitespace', () => {
-      const result = extract('  \n{"ok": true}\n  ');
+      const result = extractJSON('  \n{"ok": true}\n  ');
       expect(result).toEqual({ ok: true });
     });
 
     it('should handle JSON with leading preamble text', () => {
-      const result = extract('Here is the analysis:\n{"issues": []}');
+      const result = extractJSON('Here is the analysis:\n{"issues": []}');
       expect(result).toEqual({ issues: [] });
     });
 
     it('should handle JSON with trailing text', () => {
-      const result = extract('{"issues": []}\nHope this helps!');
+      const result = extractJSON('{"issues": []}\nHope this helps!');
       expect(result).toEqual({ issues: [] });
     });
 
     it('should handle JSON inside code fence with preamble text', () => {
-      const result = extract('```json\nHere is the analysis:\n{"issues": []}\n```');
+      const result = extractJSON('```json\nHere is the analysis:\n{"issues": []}\n```');
       expect(result).toEqual({ issues: [] });
     });
 
     it('should handle nested objects', () => {
-      const result = extract('{"a": {"b": [1, 2, 3]}}');
+      const result = extractJSON('{"a": {"b": [1, 2, 3]}}');
       expect(result).toEqual({ a: { b: [1, 2, 3] } });
     });
 
@@ -84,19 +82,19 @@ describe('LLMAnalyzer', () => {
           { "text": "second" }
         ]
       }`;
-      const result = extract(malformed);
+      const result = extractJSON(malformed);
       expect(result).toEqual({
         issues: [{ text: 'first' }, { text: 'second' }],
       });
     });
 
     it('should prefer balanced JSON object over trailing prose with braces', () => {
-      const result = extract('{"ok": true}\nNote: use {care} when editing files.');
+      const result = extractJSON('{"ok": true}\nNote: use {care} when editing files.');
       expect(result).toEqual({ ok: true });
     });
 
     it('should accept JSONC-style comments and trailing commas', () => {
-      const result = extract(`{
+      const result = extractJSON(`{
         // comment
         "items": [
           1,
@@ -108,12 +106,9 @@ describe('LLMAnalyzer', () => {
   });
 
   describe('findTextRange', () => {
-    const find = (doc: TextDocument, text: string) =>
-      (analyzer as any).findTextRange(doc, text);
-
     it('should find exact match with column offsets', () => {
       const doc = makeDoc('first line\nsecond line\nthird line');
-      const r = find(doc, 'second line');
+      const r = findTextRange(doc, 'second line');
       expect(r.line).toBe(1);
       expect(r.startChar).toBe(0);
       expect(r.endChar).toBe('second line'.length);
@@ -121,7 +116,7 @@ describe('LLMAnalyzer', () => {
 
     it('should find partial match with column offsets', () => {
       const doc = makeDoc('the quick brown fox\njumps over\nthe lazy dog');
-      const r = find(doc, 'brown fox');
+      const r = findTextRange(doc, 'brown fox');
       expect(r.line).toBe(0);
       expect(r.startChar).toBe('the quick '.length);
       expect(r.endChar).toBe('the quick brown fox'.length);
@@ -129,7 +124,7 @@ describe('LLMAnalyzer', () => {
 
     it('should return line 0 full line when no match found', () => {
       const doc = makeDoc('hello world');
-      const r = find(doc, 'nonexistent text that does not appear');
+      const r = findTextRange(doc, 'nonexistent text that does not appear');
       expect(r.line).toBe(0);
       expect(r.startChar).toBe(0);
       expect(r.endChar).toBe('hello world'.length);
@@ -137,7 +132,7 @@ describe('LLMAnalyzer', () => {
 
     it('should be case-insensitive', () => {
       const doc = makeDoc('Hello World\nGoodbye');
-      const r = find(doc, 'hello world');
+      const r = findTextRange(doc, 'hello world');
       expect(r.line).toBe(0);
       expect(r.startChar).toBe(0);
       expect(r.endChar).toBe('hello world'.length);
@@ -145,13 +140,13 @@ describe('LLMAnalyzer', () => {
 
     it('should handle empty text', () => {
       const doc = makeDoc('hello');
-      const r = find(doc, '');
+      const r = findTextRange(doc, '');
       expect(r.line).toBe(0);
     });
 
     it('should fall back to word-level partial match with column offsets', () => {
       const doc = makeDoc('line one\nline two with important word\nline three');
-      const r = find(doc, 'important word in a different sentence');
+      const r = findTextRange(doc, 'important word in a different sentence');
       expect(r.line).toBe(1);
       expect(r.startChar).toBe('line two with '.length);
       expect(r.endChar).toBe('line two with '.length + 'important'.length);
