@@ -18,6 +18,7 @@ import {
   CustomDiagnosticConfig,
   AnalysisResult
 } from './types';
+import { resolveAnalysisDocument } from './documentResolver';
 
 class ChatCustomizationsEvaluationServer {
   
@@ -68,7 +69,7 @@ class ChatCustomizationsEvaluationServer {
       customDiagnostics?: CustomDiagnosticConfig[];
     }) => {
       const customDiagnosticsCount = params.customDiagnostics?.length ?? 0;
-      const document = this.documents.get(params.uri);
+      const document = resolveAnalysisDocument(params.uri, (targetUri) => this.documents.get(targetUri));
 
       this.connection.console.log(`[Analysis] Received analyze request for ${params.uri} (customDiagnostics=${customDiagnosticsCount})`);
 
