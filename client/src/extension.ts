@@ -841,15 +841,6 @@ class ExtensionRuntime {
 
     this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Looking for user-selected model: ${userModel}`);
     this.outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
-    const copilotModels = await vscode.lm.selectChatModels({ vendor: 'copilot', family: userModel });
-    if (copilotModels.length > 0) {
-      const selectedModel = copilotModels[0];
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using user-selected Copilot model: ${selectedModel.name}`);
-      this.outputChannel.appendLine(`[LLM Proxy] User model Copilot matches found: ${copilotModels.length}`);
-      this.outputChannel.appendLine(`[LLM Proxy] Using user-selected Copilot model: ${selectedModel.name} (${selectedModel.vendor}/${selectedModel.family})`);
-      return selectedModel;
-    }
-
     const models = await vscode.lm.selectChatModels({ family: userModel });
     this.outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
     if (models.length > 0) {
