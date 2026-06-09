@@ -29,7 +29,7 @@ When analysis starts, the extension runs this flow:
    - If no issues exist, show a no-issues message.
 4. If not up to date, send an analyze request to the language server.
 5. The language server runs LLM analysis and converts results to standard diagnostics.
-6. Diagnostics are published to VS Code Problems.
+6. Diagnostics are listed under the Problems panel.
 
 ## Analysis Categories
 
