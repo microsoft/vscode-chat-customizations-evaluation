@@ -32,6 +32,11 @@ export class LLMAnalyzer {
     try { return JSON.stringify(error); } catch { return 'Unknown error'; }
   }
 
+  private formatResponsePreview(text: string, limit = 300): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+  }
+
   /**
    * Create a user-visible diagnostic for LLM analysis errors (network/auth failures).
    */
@@ -637,6 +642,17 @@ If no conflicts found, return {"conflicts": []}`;
     if (result.error) {
       throw new Error(result.error);
     }
-    return result.text;
+
+    const text = result.text?.trim() ?? '';
+    if (!text) {
+      throw new Error('Language model returned an empty response.');
+    }
+
+    // Catch obvious transport/auth/generic responses early, before JSON parse logic.
+    if (!text.startsWith('{') && !text.startsWith('```')) {
+      throw new Error(`Language model returned non-JSON response: ${this.formatResponsePreview(text)}`);
+    }
+
+    return text;
   }
 }

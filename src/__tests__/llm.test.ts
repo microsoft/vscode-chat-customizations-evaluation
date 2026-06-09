@@ -178,22 +178,32 @@ describe('LLMAnalyzer', () => {
       expect(contradictions[0].range.start.line).toBe(0); // "Be concise" on line 0
     });
 
-    it('should handle empty LLM responses gracefully', async () => {
-      const mockProxy = vi.fn().mockResolvedValue({ text: '{}' });
+    it('should surface a clear error for empty LLM responses', async () => {
+      const mockProxy = vi.fn().mockResolvedValue({ text: '' });
       analyzer.setProxyFn(mockProxy);
 
       const doc = makeDoc('Simple prompt.');
       const results = await analyzer.analyze(doc);
-      expect(Array.isArray(results)).toBe(true);
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      expect(results.some(r => r.message.includes('Language model returned an empty response.'))).toBe(true);
     });
 
-    it('should handle malformed JSON responses gracefully', async () => {
+    it('should surface non-JSON model responses as transport errors', async () => {
       const mockProxy = vi.fn().mockResolvedValue({ text: 'not valid json at all' });
       analyzer.setProxyFn(mockProxy);
 
       const doc = makeDoc('Simple prompt.');
       const results = await analyzer.analyze(doc);
-      // Malformed JSON should surface as a user-visible parse error diagnostic
+      expect(results.some(r => r.code === 'llm-error')).toBe(true);
+      expect(results.some(r => r.message.includes('non-JSON response'))).toBe(true);
+    });
+
+    it('should keep malformed JSON diagnostics when payload looks like JSON', async () => {
+      const mockProxy = vi.fn().mockResolvedValue({ text: '{"contradictions": [' });
+      analyzer.setProxyFn(mockProxy);
+
+      const doc = makeDoc('Simple prompt.');
+      const results = await analyzer.analyze(doc);
       expect(results.some(r => r.code === 'llm-parse-error')).toBe(true);
     });
 
