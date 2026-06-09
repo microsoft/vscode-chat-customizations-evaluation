@@ -43,11 +43,14 @@ An extension for analyzing and improving AI prompt files. Works with `.prompt.md
 
 LLM analysis requires **GitHub Copilot** — no API keys needed. Just sign in to GitHub Copilot in VS Code.
 
+You can also trigger analysis from Copilot Chat with the slash command `/analyze-prompt`.
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `Chat Customizations Evaluations: Analyze Prompt` | Run full LLM-powered analysis on the active file |
+| `/analyze-prompt` | Run analysis for the active customization file and summarize diagnostics in chat |
 | `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `wazaEval.yaml` and task files for the active skill |
 | `Chat Customizations Evaluations: Run Waza Evaluation` | Run the skill's eval suite |
 | `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific waza binary and configure the extension to use it |

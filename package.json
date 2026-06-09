@@ -125,6 +125,11 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "chatCustomizationsEvaluations.analyzePromptDirect",
+        "title": "Analyze (Internal)",
+        "category": "Chat Customizations Evaluations"
+      },
+      {
         "command": "chatCustomizationsEvaluations.wazaCreateEval",
         "title": "Create Waza Eval Scaffold For SKILL File",
         "category": "Chat Customizations Evaluations",
@@ -164,6 +169,10 @@
       "commandPalette": [
         {
           "command": "chatCustomizationsEvaluations.analyzePromptFromCustomization",
+          "when": "false"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.analyzePromptDirect",
           "when": "false"
         },
         {
@@ -207,6 +216,9 @@
       ]
     },
     "chatSkills": [
+      {
+        "path": "./skills/analyze-prompt/SKILL.md"
+      },
       {
         "path": "./skills/fix-customization-evaluation-diagnostics/SKILL.md"
       }

@@ -21,6 +21,7 @@ export class AnalysisCoordinator {
 
     private readonly urisWithDiagnostics = new Set<string>();
     private readonly pendingAnalysisUris = new Set<string>();
+    private readonly queuedAnalysisUris = new Set<string>();
     private readonly analysisStatesByUri = new Map<string, AnalysisState>();
     private readonly analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
     private statusBarItem: vscode.StatusBarItem | undefined;
@@ -48,12 +49,25 @@ export class AnalysisCoordinator {
         return this.pendingAnalysisUris.has(uri.toString());
     }
 
+    queueAnalysis(uri: string): void {
+        this.queuedAnalysisUris.add(uri);
+        this.updateIsAnalyzingContext();
+    }
+
+    clearQueuedAnalysis(uri: string): void {
+        if (!this.queuedAnalysisUris.delete(uri)) {
+            return;
+        }
+        this.updateIsAnalyzingContext();
+    }
+
     beginAnalysis(uri: string): void {
         const existingState = this.analysisStatesByUri.get(uri);
         if (existingState?.resolveProgress) {
             existingState.resolveProgress();
         }
 
+        this.queuedAnalysisUris.delete(uri);
         this.pendingAnalysisUris.add(uri);
         this.analysisStatesByUri.set(uri, {
             startedAt: Date.now(),
@@ -258,7 +272,7 @@ export class AnalysisCoordinator {
     }
 
     private updateIsAnalyzingContext(): void {
-        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.pendingAnalysisUris.size > 0);
+        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.pendingAnalysisUris.size > 0 || this.queuedAnalysisUris.size > 0);
     }
 
     private updateHasDiagnosticsContext(): void {

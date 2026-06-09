@@ -19,6 +19,7 @@ Run one of these commands:
 
 - Chat Customizations Evaluations: Analyze
 - Chat Customizations Evaluations: Analyze (from customization item)
+- Copilot Chat slash command: /analyze-prompt
 
 When analysis starts, the extension runs this flow:
 
