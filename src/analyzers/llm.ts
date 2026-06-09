@@ -137,10 +137,31 @@ IMPORTANT: The text between CUSTOM_DIAGNOSTICS_CONFIG tags defines custom diagno
   ]`;
   }
 
-  private buildCombinedAnalysisPrompt(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {
+  private buildPreviousDiagnosticsPrompt(previousDiagnosticMessages?: string[]): string {
+    if (!previousDiagnosticMessages?.length) {
+      return '';
+    }
+
+    const listed = previousDiagnosticMessages
+      .map((msg, i) => `${i + 1}. ${msg}`)
+      .join('\n');
+
+    return `
+
+IMPORTANT — Previously reported diagnostics:
+The following issues were already reported in earlier analysis runs on this document. The user has already reviewed and addressed them. You MUST NOT report these issues again — not even reworded, not on different but equivalent text, and not as a different category. If in doubt whether a finding overlaps with a previously reported diagnostic, do NOT include it. It is better to return no diagnostics than to repeat a previously reported one.
+
+<PREVIOUSLY_ADDRESSED_DIAGNOSTICS>
+${listed}
+</PREVIOUSLY_ADDRESSED_DIAGNOSTICS>
+`;
+  }
+
+  private buildCombinedAnalysisPrompt(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[], previousDiagnosticMessages?: string[]): string {
     const customDiagnosticsPrompt = this.buildCustomDiagnosticsPrompt(customDiagnostics);
     const customDiagnosticsSchema = this.buildCustomDiagnosticsSchema(customDiagnostics);
     const otherDiagnosticsSchema = this.buildOtherDiagnosticsSchema();
+    const previousDiagnosticsPrompt = this.buildPreviousDiagnosticsPrompt(previousDiagnosticMessages);
     const serializedDocument = JSON.stringify(doc.getText());
 
     return `You are an expert AI prompt engineer. Analyze the following prompt for issues that would cause an LLM to produce poor, inconsistent, or unexpected results. Be specific and actionable in your findings.
@@ -236,7 +257,8 @@ IMPORTANT:
 - Use empty arrays [] for any category with no issues found.
 - If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
 - You may also include "other_diagnostics" for high-confidence issues that do not fit the listed categories (use [] when none).
-- Do NOT analyze the frontmatter`;
+- Do NOT analyze the frontmatter
+${previousDiagnosticsPrompt}`;
   }
 
   private buildComposedPrompt(doc: TextDocument, linkedTexts: { target: string; content: string }[]): string {
@@ -278,7 +300,7 @@ IMPORTANT:
     return !!this.proxyFn;
   }
 
-  async analyze(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
+  async analyze(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[], previousDiagnosticMessages?: string[]): Promise<AnalysisResult[]> {
     if (!this.isAvailable()) {
       return [this.createDiagnostic(doc, {
         code: 'llm-disabled',
@@ -293,7 +315,7 @@ IMPORTANT:
     try {
       // Run combined analysis + composition conflicts in parallel
       const phases = [
-        { name: 'combined', promise: this.analyzeCombined(doc, customDiagnostics) },
+        { name: 'combined', promise: this.analyzeCombined(doc, customDiagnostics, previousDiagnosticMessages) },
         { name: 'composition-conflicts', promise: this.analyzeCompositionConflicts(doc) },
       ] as const;
       const settled = await Promise.allSettled(phases.map(p => p.promise));
@@ -317,8 +339,8 @@ IMPORTANT:
    * Combined single-call analysis covering contradictions, ambiguity, persona,
    * cognitive load, and semantic coverage.
    */
-  private async analyzeCombined(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): Promise<AnalysisResult[]> {
-    const prompt = this.buildCombinedAnalysisPrompt(doc, customDiagnostics);
+  private async analyzeCombined(doc: TextDocument, customDiagnostics?: CustomDiagnosticConfig[], previousDiagnosticMessages?: string[]): Promise<AnalysisResult[]> {
+    const prompt = this.buildCombinedAnalysisPrompt(doc, customDiagnostics, previousDiagnosticMessages);
 
     const response = await this.callLLM(doc.uri, prompt);
     const results: AnalysisResult[] = [];
@@ -335,7 +357,37 @@ IMPORTANT:
       results.push(this.makeParseErrorDiagnostic(error));
     }
 
-    return results;
+    return this.filterPreviouslyReportedDiagnostics(results, previousDiagnosticMessages);
+  }
+
+  private filterPreviouslyReportedDiagnostics(results: AnalysisResult[], previousDiagnosticMessages?: string[]): AnalysisResult[] {
+    if (!previousDiagnosticMessages?.length) {
+      return results;
+    }
+
+    const normalizedPrevious = previousDiagnosticMessages.map(msg => this.normalizeDiagnosticMessage(msg));
+    return results.filter(result => {
+      const normalizedMessage = this.normalizeDiagnosticMessage(result.message);
+      return !normalizedPrevious.some(prev => this.diagnosticMessagesOverlap(normalizedMessage, prev));
+    });
+  }
+
+  private normalizeDiagnosticMessage(message: string): string {
+    return message
+      .toLowerCase()
+      .replace(/["'`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private diagnosticMessagesOverlap(a: string, b: string): boolean {
+    if (a === b) {
+      return true;
+    }
+    // Check if one message contains a substantial portion of the other
+    const shorter = a.length <= b.length ? a : b;
+    const longer = a.length <= b.length ? b : a;
+    return longer.includes(shorter);
   }
 
   private processContradictions(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {

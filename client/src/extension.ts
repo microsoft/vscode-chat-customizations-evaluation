@@ -46,6 +46,7 @@ class ExtensionRuntime {
   private analysisCoordinator!: AnalysisCoordinator;
   private extensionDiagnosticCollection!: vscode.DiagnosticCollection;
   private readonly pendingDiagnosticEditsByUri = new Map<string, { fullDocument: boolean; ranges: vscode.Range[] }>();
+  private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
 
   activate(context: vscode.ExtensionContext): void {
     this.initializeCoreServices(context);
@@ -394,6 +395,7 @@ class ExtensionRuntime {
     }
 
     await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
+    this.extensionDiagnosticCollection.set(targetUri, []);
 
     const hasImprovements = await this.waitForDocumentImprovements(
       targetUri,
@@ -460,9 +462,11 @@ class ExtensionRuntime {
   }
 
   private createAnalyzeRequest(uri: vscode.Uri): AnalyzeRequest {
+    const previousMessages = this.previousDiagnosticMessagesByUri.get(uri.toString());
     return {
       uri: uri.toString(),
       customDiagnostics: this.getCustomDiagnostics(),
+      previousDiagnosticMessages: previousMessages?.length ? previousMessages : undefined,
     };
   }
 
@@ -511,6 +515,7 @@ class ExtensionRuntime {
       }
 
       await this.analysisCoordinator.completeAnalysis(options.uri, result);
+      this.accumulatePreviousDiagnostics(options.uri);
       this.logTelemetryUsage(options.resultEventName, {
         outcome: 'success',
         resultCount: result.resultCount,
@@ -525,6 +530,27 @@ class ExtensionRuntime {
 
   private sendAnalyzeRequest(analyzeRequest: AnalyzeRequest): Thenable<{ duration: number; resultCount: number }> {
     return this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+  }
+
+  private accumulatePreviousDiagnostics(uri: vscode.Uri): void {
+    const currentDiagnostics = this.getExtensionDiagnostics(uri);
+    if (currentDiagnostics.length === 0) {
+      return;
+    }
+
+    const uriKey = uri.toString();
+    const existing = this.previousDiagnosticMessagesByUri.get(uriKey) ?? [];
+    const existingSet = new Set(existing);
+
+    for (const diagnostic of currentDiagnostics) {
+      const message = diagnostic.message.trim();
+      if (message && !existingSet.has(message)) {
+        existing.push(message);
+        existingSet.add(message);
+      }
+    }
+
+    this.previousDiagnosticMessagesByUri.set(uriKey, existing);
   }
 
   private getSortedExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
@@ -584,6 +610,7 @@ class ExtensionRuntime {
     }
 
     const uri = event.document.uri;
+    this.previousDiagnosticMessagesByUri.delete(uri.toString());
     const uriKey = uri.toString();
     const currentEdit = this.pendingDiagnosticEditsByUri.get(uriKey) ?? { fullDocument: false, ranges: [] };
     const nextEdit = this.mergeDiagnosticEdit(currentEdit, event.contentChanges);

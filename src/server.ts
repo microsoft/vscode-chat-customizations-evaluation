@@ -66,6 +66,7 @@ class ChatCustomizationsEvaluationServer {
     this.connection.onRequest('chatCustomizationsEvaluations/analyze', async (params: {
       uri: string;
       customDiagnostics?: CustomDiagnosticConfig[];
+      previousDiagnosticMessages?: string[];
     }) => {
       const customDiagnosticsCount = params.customDiagnostics?.length ?? 0;
       const document = this.documents.get(params.uri);
@@ -80,7 +81,7 @@ class ChatCustomizationsEvaluationServer {
       this.connection.console.log(`[Analysis] Found document for ${params.uri}; starting request analysis`);
 
       try {
-        const result = await this.runFullAnalysis(document, params.customDiagnostics);
+        const result = await this.runFullAnalysis(document, params.customDiagnostics, params.previousDiagnosticMessages);
         this.connection.console.log(`[Analysis] Analyze request finished for ${params.uri} (duration=${result.duration}ms, diagnostics=${result.resultCount})`);
         return result;
       } catch (error) {
@@ -108,6 +109,7 @@ class ChatCustomizationsEvaluationServer {
   private async runFullAnalysis(
     textDocument: TextDocument,
     customDiagnostics?: CustomDiagnosticConfig[],
+    previousDiagnosticMessages?: string[],
   ): Promise<{ duration: number; resultCount: number }> {
     const uri = textDocument.uri;
     const customDiagnosticsCount = customDiagnostics?.length ?? 0;
@@ -116,7 +118,7 @@ class ChatCustomizationsEvaluationServer {
     this.connection.console.log(`[Analysis] Starting full analysis for ${uri} (customDiagnostics=${customDiagnosticsCount})`);
 
     this.connection.console.log(`[Analysis] Running LLM analyzer for ${uri}`);
-    const llmResults = await this.llmAnalyzer.analyze(textDocument, customDiagnostics);
+    const llmResults = await this.llmAnalyzer.analyze(textDocument, customDiagnostics, previousDiagnosticMessages);
     this.connection.console.log(`[Analysis] LLM analyzer completed for ${uri} with ${llmResults.length} results`);
 
     this.connection.console.log(`[Analysis] Converting results to diagnostics for ${uri}`);
