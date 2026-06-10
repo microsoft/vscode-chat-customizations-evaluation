@@ -70,10 +70,10 @@ export class LLMAnalyzer {
   }
 
   private getRangeFromText(doc: TextDocument, text: string): AnalysisResult['range'] {
-    const { line, startChar, endChar } = findTextRange(doc, text);
+    const { line, startChar, endLine, endChar } = findTextRange(doc, text);
     return {
       start: { line, character: startChar },
-      end: { line, character: endChar },
+      end: { line: endLine, character: endChar },
     };
   }
 

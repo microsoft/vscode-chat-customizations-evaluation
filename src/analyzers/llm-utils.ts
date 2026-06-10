@@ -201,29 +201,22 @@ function findNextNonWhitespace(text: string, index: number): string | undefined 
 export function findTextRange(
   doc: TextDocument,
   text: string,
-): { line: number; startChar: number; endChar: number } {
-  if (!text) return { line: 0, startChar: 0, endChar: doc.getText().split('\n')[0]?.length || 0 };
-
-  const lines = doc.getText().split('\n');
-  const lowerText = text.toLowerCase();
-
-  for (let i = 0; i < lines.length; i++) {
-    const col = lines[i].toLowerCase().indexOf(lowerText);
-    if (col !== -1) {
-      return { line: i, startChar: col, endChar: col + text.length };
-    }
+): { line: number; startChar: number; endLine: number; endChar: number } {
+  if (!text) {
+    const firstLineLen = doc.getText().split('\n')[0]?.length || 0;
+    return { line: 0, startChar: 0, endLine: 0, endChar: firstLineLen };
   }
 
-  const words = lowerText.split(/\s+/).filter(w => w.length > 3).slice(0, 5);
-  for (let i = 0; i < lines.length; i++) {
-    const lowerLine = lines[i].toLowerCase();
-    for (const word of words) {
-      const col = lowerLine.indexOf(word);
-      if (col !== -1) {
-        return { line: i, startChar: col, endChar: col + word.length };
-      }
-    }
+  const content = doc.getText();
+  const index = content.indexOf(text);
+
+  if (index === -1) {
+    const firstLineLen = content.split('\n')[0]?.length || 0;
+    return { line: 0, startChar: 0, endLine: 0, endChar: firstLineLen };
   }
 
-  return { line: 0, startChar: 0, endChar: lines[0]?.length || 0 };
+  const start = doc.positionAt(index);
+  const end = doc.positionAt(index + text.length);
+
+  return { line: start.line, startChar: start.character, endLine: end.line, endChar: end.character };
 }
