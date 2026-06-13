@@ -391,7 +391,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processContradictions(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const c of parsed.contradictions || []) {
+    for (const c of (parsed.contradictions || []).filter(Boolean)) {
       const primaryRange = findTextRange(doc, c.instruction1);
       const relatedRange = findTextRange(doc, c.instruction2);
 
@@ -414,7 +414,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processAmbiguity(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const issue of parsed.ambiguity_issues || []) {
+    for (const issue of (parsed.ambiguity_issues || []).filter(Boolean)) {
       const problem = issue.problem ? `${issue.problem} ` : '';
       results.push(this.createDiagnostic(doc, {
         code: 'ambiguity-llm',
@@ -427,7 +427,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processPersona(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const issue of parsed.persona_issues || []) {
+    for (const issue of (parsed.persona_issues || []).filter(Boolean)) {
       results.push(this.createDiagnostic(doc, {
         code: 'persona-inconsistency',
         message: `Persona conflict: ${issue.description}. The prompt sets "${issue.trait1}" but also "${issue.trait2}". Suggestion: ${issue.suggestion}`,
@@ -439,7 +439,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processCognitiveLoad(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const issue of parsed.cognitive_load || []) {
+    for (const issue of (parsed.cognitive_load || []).filter(Boolean)) {
       results.push(this.createDiagnostic(doc, {
         code: `cognitive-${issue.type}`,
         message: `Cognitive load (${issue.type}): ${issue.description}. Suggestion: ${issue.suggestion}`,
@@ -451,7 +451,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processCoverage(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const gap of parsed.coverage_gaps || []) {
+    for (const gap of (parsed.coverage_gaps || []).filter(Boolean)) {
       results.push(this.createDiagnostic(doc, {
         code: 'coverage-gap',
         message: `Coverage gap: ${gap.gap}. Suggestion: ${gap.suggestion}`,
@@ -461,7 +461,7 @@ ${previousDiagnosticsPrompt}`;
       }));
     }
 
-    for (const err of parsed.missing_error_handling || []) {
+    for (const err of (parsed.missing_error_handling || []).filter(Boolean)) {
       results.push(this.createDiagnostic(doc, {
         code: 'missing-error-handling',
         message: `Missing error handling: ${err.scenario}. Suggestion: ${err.suggestion}`,
@@ -473,7 +473,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processCustomDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const issue of parsed.custom_diagnostics || []) {
+    for (const issue of (parsed.custom_diagnostics || []).filter(Boolean)) {
       const relevantText = issue.relevant_text || issue.description;
       const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
 
@@ -488,7 +488,7 @@ ${previousDiagnosticsPrompt}`;
   }
 
   private processOtherDiagnostics(doc: TextDocument, parsed: LLMCombinedAnalysisResponse, results: AnalysisResult[]): void {
-    for (const issue of parsed.other_diagnostics || []) {
+    for (const issue of (parsed.other_diagnostics || []).filter(Boolean)) {
       const relevantText = issue.relevant_text || issue.description;
       const suggestion = issue.suggestion ? ` Suggestion: ${issue.suggestion}` : '';
 
@@ -548,7 +548,7 @@ If no conflicts found, return {"conflicts": []}`;
 
     try {
       const parsed = extractJSON<{ conflicts?: LLMCombinedAnalysisResponse['composition_conflicts'] }>(response);
-      for (const conflict of parsed.conflicts || []) {
+      for (const conflict of (parsed.conflicts || []).filter(Boolean)) {
         results.push(this.createDiagnostic(doc, {
           code: 'composition-conflict',
           message: `Composition conflict: ${conflict.summary}. "${conflict.instruction1}" vs "${conflict.instruction2}"`,
