@@ -142,7 +142,7 @@ describe('LLMAnalyzer', () => {
       expect(r.endChar).toBe('hello world'.length);
     });
 
-    it('should be case-sensitive', () => {
+    it('should return fallback when exact case does not match', () => {
       const doc = makeDoc('Hello World\nGoodbye');
       const r = findTextRange(doc, 'hello world');
       expect(r.line).toBe(0);
@@ -399,7 +399,85 @@ describe('LLMAnalyzer', () => {
       expect(errorDiag.message).toContain('403');
     });
   });
-});
+
+  // Spec-only: the AnalysisResult -> Diagnostic conversion lives in the client
+  // (extension side), not in this server module, so there is no production
+  // function to import here. This documents the expected mapping shape/contract.
+  describe('AnalysisResult -> Diagnostic mapping (spec)', () => {
+    it('maps AnalysisResult fields onto the Diagnostic shape', () => {
+      const results = [{
+        code: 'contradiction',
+        message: 'Test message',
+        range: { start: { line: 1, character: 2 }, end: { line: 3, character: 4 } },
+        analyzer: 'test-analyzer',
+        suggestion: 'Try this fix',
+      }];
+      const diagnostics = results.map((result) => ({
+        severity: 2,
+        range: result.range,
+        message: result.message,
+        source: 'chat-customizations-evaluations (' + result.analyzer + ')',
+        code: result.code,
+        data: result.suggestion,
+      }));
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].code).toBe('contradiction');
+      expect(diagnostics[0].message).toBe('Test message');
+      expect(diagnostics[0].range).toEqual({ start: { line: 1, character: 2 }, end: { line: 3, character: 4 } });
+      expect(diagnostics[0].source).toBe('chat-customizations-evaluations (test-analyzer)');
+      expect(diagnostics[0].data).toBe('Try this fix');
+    });
+  });
+
+  describe('private methods', () => {
+    it('normalizeDiagnosticMessage should lowercase and trim messages', () => {
+      const result = (analyzer as any).normalizeDiagnosticMessage('  "HELLO World"  ');
+      expect(result).toBe('hello world');
+    });
+
+    it('diagnosticMessagesOverlap should return true for identical messages', () => {
+      expect((analyzer as any).diagnosticMessagesOverlap('hello world', 'hello world')).toBe(true);
+    });
+
+    it('diagnosticMessagesOverlap should return true when one contains the other', () => {
+      expect((analyzer as any).diagnosticMessagesOverlap('hello world foo bar', 'hello world')).toBe(true);
+    });
+
+    it('diagnosticMessagesOverlap should return false for unrelated messages', () => {
+      expect((analyzer as any).diagnosticMessagesOverlap('first message', 'second message')).toBe(false);
+    });
+
+    it('filterPreviouslyReportedDiagnostics should filter out matching diagnostics', () => {
+      const results = [
+        { code: 'test', message: 'Contradiction: "A" conflicts with "B".', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' },
+        { code: 'test', message: 'Ambiguous: "C". Suggestion: D', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' },
+      ];
+      const filtered = (analyzer as any).filterPreviouslyReportedDiagnostics(results, [
+        'Contradiction: "A" conflicts with "B".',
+      ]);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].message).toContain('Ambiguous');
+    });
+
+    it('filterPreviouslyReportedDiagnostics should return all results when no previous diagnostics', () => {
+      const results = [{ code: 'test', message: 'Some issue', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' }];
+      const filtered = (analyzer as any).filterPreviouslyReportedDiagnostics(results, undefined);
+      expect(filtered).toHaveLength(1);
+    });
+
+    it('formatResponsePreview should return short text as-is', () => {
+      const result = (analyzer as any).formatResponsePreview('Hello');
+      expect(result).toBe('Hello');
+    });
+
+    it('formatResponsePreview should truncate long text with ellipsis', () => {
+      const longText = 'x'.repeat(400);
+      const result = (analyzer as any).formatResponsePreview(longText);
+      expect(result.length).toBe(303);
+      expect(result.endsWith('...')).toBe(true);
+    });
+  });
+  });
 
 function makeDoc(text: string): TextDocument {
   return TextDocument.create('file:///test.prompt.md', 'prompt', 1, text);
