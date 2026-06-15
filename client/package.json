@@ -69,6 +69,16 @@
           "type": "string",
           "default": "claude-sonnet-4.6",
           "description": "Model to use for analysis (e.g., claude-sonnet-4.6, gpt-4o, gpt-4.1, etc). Defaults to claude-sonnet-4.6."
+        },
+        "chatCustomizationsEvaluations.suggestions.showQuickFixes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show quick fixes (copy suggestion, insert as comment) for diagnostics that include a suggestion."
+        },
+        "chatCustomizationsEvaluations.suggestions.showHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the suggestion text on hover for diagnostics that include a suggestion."
         }
       }
     },
@@ -99,7 +109,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "cd .. && vitest run client/src/__tests__"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

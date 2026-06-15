@@ -36,7 +36,7 @@ class ChatCustomizationsEvaluationServer {
   }
 
   private registerHandlers(): void {
-    this.connection.onInitialize((params: InitializeParams) => {
+    this.connection.onInitialize((_params: InitializeParams) => {
       const result: InitializeResult = {
         capabilities: {
           textDocumentSync: {

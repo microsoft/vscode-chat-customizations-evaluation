@@ -26,6 +26,7 @@ An extension for analyzing and improving AI prompt files. Works with `.prompt.md
 - **Editor Title Bar** — Analyze Prompt button appears when editing prompt files
 - **Command Palette** — `Chat Customizations Evaluations: Analyze Prompt` command
 - **Problems Panel** — All diagnostics appear in the standard VS Code Problems panel with precise line and column locations
+- **Suggestion Quick Fixes** — Diagnostics that include a suggestion offer instant actions (no extra LLM call) to copy the suggestion or insert it as a comment, and show it on hover
 
 ## Supported File Types
 
@@ -69,6 +70,8 @@ You can also trigger analysis from Copilot Chat with the slash command `/analyze
 | `chatCustomizationsEvaluations.trace.server` | `off` | Trace communication between VS Code and the language server |
 | `chatCustomizationsEvaluations.customDiagnostics` | `[]` | Array of custom diagnostic objects with `name` and `description` fields |
 | `chatCustomizationsEvaluations.waza.command` | `waza` | Command used to run waza (for example `/usr/local/bin/waza`) |
+| `chatCustomizationsEvaluations.suggestions.showQuickFixes` | `true` | Show quick fixes (copy suggestion, insert as comment) for diagnostics that include a suggestion |
+| `chatCustomizationsEvaluations.suggestions.showHover` | `true` | Show the suggestion text on hover for diagnostics that include a suggestion |
 
 ### Telemetry
 

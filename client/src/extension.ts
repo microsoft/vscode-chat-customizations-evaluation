@@ -14,10 +14,18 @@ import {
   registerWazaCommands,
 } from './waza/waza';
 import {
-  ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS, NON_FIXABLE_DIAGNOSTIC_CODES,
+  ACTION_ANALYZE_AGAIN, ACTION_COPY_SUGGESTION, ACTION_FIX_DIAGNOSTICS, ACTION_INSERT_SUGGESTION_COMMENT,
+  MESSAGE_NO_SUGGESTION_TO_COPY,
+  MESSAGE_SUGGESTION_COPIED,
+  NON_FIXABLE_DIAGNOSTIC_CODES,
   TELEMETRY_AUTH_TOKEN_ENV,
   TELEMETRY_ENDPOINT_ENV
 } from './strings';
+import {
+  buildCopySuggestionLabel,
+  formatSuggestionComment,
+  getDiagnosticSuggestion,
+} from './suggestionUtils';
 import type {
   AnalyzeRequest, CustomDiagnosticConfig, LLMProxyRequest,
   LLMProxyResponse,
@@ -30,6 +38,19 @@ import { ExtensionTelemetrySender } from './telemetry';
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
 type AnalysisSnapshot = Awaited<ReturnType<AnalysisCoordinator['getCurrentAnalysisSnapshot']>>;
+
+/** File schemes/languages this extension analyzes; shared by the language client, code actions, and hovers. */
+const CUSTOMIZATION_DOCUMENT_SELECTOR: vscode.DocumentSelector = [
+  { scheme: 'file', language: 'prompt' },
+  { scheme: 'file', language: 'chatagent' },
+  { scheme: 'file', language: 'skill' },
+  { scheme: 'file', language: 'instructions' },
+  { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
+  { scheme: 'vscode-userdata', language: 'prompt' },
+  { scheme: 'vscode-userdata', language: 'chatagent' },
+  { scheme: 'vscode-userdata', language: 'skill' },
+  { scheme: 'vscode-userdata', language: 'instructions' },
+];
 
 class ExtensionRuntime {
 
@@ -136,17 +157,7 @@ class ExtensionRuntime {
 
   private createClientOptions(): LanguageClientOptions {
     return {
-      documentSelector: [
-        { scheme: 'file', language: 'prompt' },
-        { scheme: 'file', language: 'chatagent' },
-        { scheme: 'file', language: 'skill' },
-        { scheme: 'file', language: 'instructions' },
-        { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
-        { scheme: 'vscode-userdata', language: 'prompt' },
-        { scheme: 'vscode-userdata', language: 'chatagent' },
-        { scheme: 'vscode-userdata', language: 'skill' },
-        { scheme: 'vscode-userdata', language: 'instructions' },
-      ],
+      documentSelector: CUSTOMIZATION_DOCUMENT_SELECTOR as LanguageClientOptions['documentSelector'],
       synchronize: {
         fileEvents: [
           vscode.workspace.createFileSystemWatcher('**/*{prompt.md, agent.md, instructions.md, SKILL.md, AGENTS.md}')
@@ -203,29 +214,54 @@ class ExtensionRuntime {
   }
 
   private registerCodeActionProvider(context: vscode.ExtensionContext): void {
-    const documentSelector: vscode.DocumentSelector = [
-      { scheme: 'file', language: 'prompt' },
-      { scheme: 'file', language: 'chatagent' },
-      { scheme: 'file', language: 'skill' },
-      { scheme: 'file', language: 'instructions' },
-      { scheme: 'file', language: 'markdown', pattern: '**/AGENTS.md' },
-      { scheme: 'vscode-userdata', language: 'prompt' },
-      { scheme: 'vscode-userdata', language: 'chatagent' },
-      { scheme: 'vscode-userdata', language: 'skill' },
-      { scheme: 'vscode-userdata', language: 'instructions' },
-    ];
-
     this.outputChannel.appendLine('[Code Actions] Registering code action provider');
     context.subscriptions.push(
-      vscode.languages.registerCodeActionsProvider(documentSelector, {
+      vscode.languages.registerCodeActionsProvider(CUSTOMIZATION_DOCUMENT_SELECTOR, {
         provideCodeActions: (document, range, context) => this.provideCodeActions(document, range, context),
       }, {
         providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
       }),
+      vscode.languages.registerHoverProvider(CUSTOMIZATION_DOCUMENT_SELECTOR, {
+        provideHover: (document, position) => this.provideSuggestionHover(document, position),
+      }),
     );
   }
 
-  private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, context: vscode.CodeActionContext): vscode.CodeAction[] {
+  private isSuggestionFeatureEnabled(key: 'showQuickFixes' | 'showHover'): boolean {
+    return vscode.workspace
+      .getConfiguration('chatCustomizationsEvaluations.suggestions')
+      .get<boolean>(key, true);
+  }
+
+  private provideSuggestionHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
+    if (!this.isSuggestionFeatureEnabled('showHover')) {
+      return undefined;
+    }
+    const suggestions: string[] = [];
+    for (const diagnostic of this.getExtensionDiagnostics(document.uri)) {
+      if (!diagnostic.range.contains(position)) {
+        continue;
+      }
+      const suggestion = getDiagnosticSuggestion(diagnostic);
+      if (suggestion) {
+        suggestions.push(suggestion);
+      }
+    }
+    if (suggestions.length === 0) {
+      return undefined;
+    }
+
+    const markdown = new vscode.MarkdownString();
+    markdown.isTrusted = false;
+    for (const suggestion of suggestions) {
+      markdown.appendMarkdown('**Suggestion:**\n\n');
+      markdown.appendCodeblock(suggestion);
+      markdown.appendMarkdown('\n\n');
+    }
+    return new vscode.Hover(markdown);
+  }
+
+  private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, _context: vscode.CodeActionContext): vscode.CodeAction[] {
     const allDiagnostics = this.getExtensionDiagnostics(document.uri);
     const fixableDiagnostics = allDiagnostics.filter(
       d => !this.isNonFixableDiagnostic(d) && this.rangesOverlap(d.range, range),
@@ -235,16 +271,54 @@ class ExtensionRuntime {
       return [];
     }
 
-    return fixableDiagnostics.map(diagnostic => {
-      const action = new vscode.CodeAction(ACTION_FIX_DIAGNOSTICS, vscode.CodeActionKind.QuickFix);
-      action.diagnostics = [diagnostic];
-      action.command = {
+    const actions: vscode.CodeAction[] = [];
+    for (const diagnostic of fixableDiagnostics) {
+      const fixAction = new vscode.CodeAction(ACTION_FIX_DIAGNOSTICS, vscode.CodeActionKind.QuickFix);
+      fixAction.diagnostics = [diagnostic];
+      fixAction.command = {
         command: 'chatCustomizationsEvaluations.fixDiagnostics',
         title: ACTION_FIX_DIAGNOSTICS,
         arguments: [[diagnostic]],
       };
-      return action;
-    });
+      actions.push(fixAction);
+
+      // When the diagnostic already carries a suggestion (server puts it in `data`),
+      // offer instant actions that apply it without another LLM round-trip.
+      const suggestion = this.isSuggestionFeatureEnabled('showQuickFixes')
+        ? getDiagnosticSuggestion(diagnostic)
+        : undefined;
+      if (suggestion) {
+        const copyAction = new vscode.CodeAction(buildCopySuggestionLabel(suggestion), vscode.CodeActionKind.QuickFix);
+        copyAction.diagnostics = [diagnostic];
+        copyAction.command = {
+          command: 'chatCustomizationsEvaluations.copySuggestion',
+          title: ACTION_COPY_SUGGESTION,
+          arguments: [suggestion],
+        };
+        actions.push(copyAction);
+
+        const insertAction = new vscode.CodeAction(ACTION_INSERT_SUGGESTION_COMMENT, vscode.CodeActionKind.QuickFix);
+        insertAction.diagnostics = [diagnostic];
+        insertAction.edit = this.buildInsertSuggestionCommentEdit(document, diagnostic, suggestion);
+        actions.push(insertAction);
+      }
+    }
+    return actions;
+  }
+
+  private buildInsertSuggestionCommentEdit(
+    document: vscode.TextDocument,
+    diagnostic: vscode.Diagnostic,
+    suggestion: string,
+  ): vscode.WorkspaceEdit {
+    const line = document.lineAt(diagnostic.range.start.line);
+    const indent = line.text.slice(0, line.firstNonWhitespaceCharacterIndex);
+    const insertPosition = new vscode.Position(diagnostic.range.start.line, 0);
+    const commentLine = `${indent}${formatSuggestionComment(suggestion)}\n`;
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(document.uri, insertPosition, commentLine);
+    return edit;
   }
 
   private registerWorkspaceHandlers(context: vscode.ExtensionContext): void {
@@ -396,8 +470,22 @@ class ExtensionRuntime {
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.handleAnalyzePromptCommand(obj)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async (diagnostics?: vscode.Diagnostic[]) => this.handleFixDiagnosticsCommand(diagnostics)),
+      vscode.commands.registerCommand('chatCustomizationsEvaluations.copySuggestion', async (suggestion?: string) => this.handleCopySuggestionCommand(suggestion)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),
     );
+  }
+
+  private async handleCopySuggestionCommand(suggestion?: string): Promise<void> {
+    const text = suggestion?.trim();
+    if (!text) {
+      this.logTelemetryUsage('command/copySuggestion', { outcome: 'empty' });
+      void vscode.window.showWarningMessage(MESSAGE_NO_SUGGESTION_TO_COPY);
+      return;
+    }
+
+    await vscode.env.clipboard.writeText(text);
+    this.logTelemetryUsage('command/copySuggestion', { outcome: 'success' });
+    void vscode.window.showInformationMessage(MESSAGE_SUGGESTION_COPIED);
   }
 
   private async handleAnalyzePromptUsingSlashCommand(obj?: unknown): Promise<void> {
