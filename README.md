@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An extension for analyzing and improving AI prompt files. Works with `.prompt.md`, `.agent.md`, `SKILL.md`, and `.instructions.md` files — providing LLM-powered semantic analysis directly in VS Code.
+An extension for analyzing and improving AI prompt files. Works with `SKILL.md`, `.agent.md`, `.instructions.md`, and `.prompt.md` files — providing LLM-powered semantic analysis directly in VS Code.
 
 ## Features
 
@@ -31,9 +31,10 @@ An extension for analyzing and improving AI prompt files. Works with `.prompt.md
 
 | Pattern | Type |
 |---|---|
-| `*.prompt.md` | Prompt |
+| `SKILL.md` | Skill |
 | `*.agent.md` | Agent |
 | `*.instructions.md` | Instructions |
+| `*.prompt.md` | Prompt (VS Code only) |
 
 ## Usage
 
