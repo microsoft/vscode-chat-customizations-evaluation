@@ -7,7 +7,6 @@ interface WazaCommandExecutorDependencies {
     getOutputChannel: () => vscode.OutputChannel;
     getWazaCommand: () => string;
     getManagedWazaBinaryPath: () => string;
-    getExtensionStoragePath: () => string;
     installManagedWazaBinary: () => Promise<void>;
 }
 

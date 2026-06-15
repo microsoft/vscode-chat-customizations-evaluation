@@ -40,7 +40,6 @@ class WazaOrchestrator {
             getOutputChannel: () => this.requireDeps().outputChannel,
             getWazaCommand: () => this.getWazaCommand(),
             getManagedWazaBinaryPath: () => this.getManagedWazaBinaryPath(),
-            getExtensionStoragePath: () => this.requireDeps().extensionContext.globalStorageUri.fsPath,
             installManagedWazaBinary: async () => await this.installManagedWazaBinary(),
         });
     }
