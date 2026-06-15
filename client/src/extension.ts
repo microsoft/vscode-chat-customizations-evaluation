@@ -266,7 +266,6 @@ class ExtensionRuntime {
   private registerModelHandlers(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.lm.onDidChangeChatModels(() => {
-        this.outputChannel.appendLine('[LLM Proxy] Models changed, clearing cache');
         this.cachedModel = undefined;
         this.modelSelectionPromise = undefined;
       })
