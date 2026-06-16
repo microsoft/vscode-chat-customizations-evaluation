@@ -1265,8 +1265,8 @@ class WazaOrchestrator {
             outcome: 'failed',
             usedTemporaryWorkspaceFallback,
         });
-        outputChannel.appendLine(`[Waza] eval scaffold failed\n${result.stderr || result.stdout}`);
-        void vscode.window.showErrorMessage('Failed to create Waza eval scaffold. See "Chat Customizations Evaluations" output for details.');
+        outputChannel.appendLine(`[Waza] Rval scaffold failed\n${result.stderr || result.stdout}`);
+        void vscode.window.showErrorMessage('Failed to create Waza eval scaffold. See "Chat Customizations Evaluations" output for details. Error: ' + (result.stderr || result.stdout));
     }
 
     private logAndBuildScaffoldSummary(
