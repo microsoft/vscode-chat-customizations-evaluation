@@ -1,6 +1,6 @@
 export const WAZA_USER_GUIDE_FALLBACK = `# Waza User Guide
 
-This guide explains how to use waza from the Chat Customizations Evaluations extension.
+This guide explains how to use Waza from the Chat Customizations Evaluations extension.
 
 ## What Is Waza?
 
@@ -10,7 +10,7 @@ With this extension, you can:
 - Create a starter eval scaffold for a customization.
 - Run the eval and save the results to a JSON file.
 - Open and review the saved results.
-- Download and configure a local waza binary.
+- Download and configure a local Waza binary.
 
 ## Main Commands
 

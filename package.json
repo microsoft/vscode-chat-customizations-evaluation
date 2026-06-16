@@ -98,12 +98,12 @@
         "chatCustomizationsEvaluations.waza.command": {
           "type": "string",
           "default": "waza",
-          "description": "Command used to invoke waza (for example: waza, /usr/local/bin/waza)"
+          "description": "Command used to invoke Waza (for example: waza, /usr/local/bin/waza)"
         },
         "chatCustomizationsEvaluations.waza.alwaysRunAfterFixDiagnostics": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically run an existing waza eval after Implement suggestions applies improvements"
+          "description": "Automatically run an existing Waza eval after Implement suggestions applies improvements"
         }
       }
     },

@@ -7,7 +7,7 @@ This guide explains how the extension analyzes customization files, how diagnost
 - Manual analysis from the command palette and editor actions.
 - How LLM analysis categories map to diagnostics in Problems.
 - What happens when you run Implement suggestions.
-- What happens after fixes are applied (optional waza eval flow).
+- What happens after fixes are applied (optional Waza eval flow).
 
 ## Supported Files
 
@@ -86,8 +86,8 @@ The fix skill is instructed to:
 
 If fixes were applied and the file belongs to a skill context:
 
-1. The extension looks for a waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support).
-2. If found, it can run waza eval immediately (or persist an always-run preference).
+1. The extension looks for a Waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support).
+2. If found, it can run Waza eval immediately (or persist an always-run preference).
 3. If missing, it offers to scaffold evals and optionally run them.
 
 This gives a tight loop: analyze -> fix -> validate.
@@ -96,7 +96,7 @@ This gives a tight loop: analyze -> fix -> validate.
 
 - `chatCustomizationsEvaluations.customDiagnostics`: Adds extra LLM checks.
 - `chatCustomizationsEvaluations.model`: Preferred model for analysis.
-- `chatCustomizationsEvaluations.waza.command`: waza command path.
+- `chatCustomizationsEvaluations.waza.command`: Waza command path.
 - `chatCustomizationsEvaluations.waza.alwaysRunAfterFixDiagnostics`: Auto-run eval after successful fixes.
 
 ## Practical Tips
@@ -104,4 +104,4 @@ This gives a tight loop: analyze -> fix -> validate.
 - Re-run analysis after any substantial edit; snapshot freshness is text-based.
 - Keep custom diagnostics specific and testable to improve fix quality.
 - Treat Implement suggestions as a targeted rewrite pass, not a full refactor pass.
-- Use waza evals to confirm behavior after applying fixes.
+- Use Waza evals to confirm behavior after applying fixes.

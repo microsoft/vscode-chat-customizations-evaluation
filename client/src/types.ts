@@ -15,8 +15,6 @@ export interface AnalysisState {
   startedAt: number;
   stage: string;
   llmRequestsInFlight: number;
-  progressReporter?: vscode.Progress<{ message?: string; increment?: number }>;
-  resolveProgress?: () => void;
 }
 
 export interface AnalysisSnapshot {

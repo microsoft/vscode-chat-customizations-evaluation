@@ -1,8 +1,8 @@
 # Waza User Guide
 
-This guide explains how to use waza from the Chat Customizations Evaluations extension.
+This guide explains how to use Waza from the Chat Customizations Evaluations extension.
 
-If you want deeper details on waza itself (schemas, graders, roadmap, releases), see: https://github.com/microsoft/waza
+If you want deeper details on Waza itself (schemas, graders, roadmap, releases), see: https://github.com/microsoft/waza
 
 ## What Is Waza?
 
@@ -12,7 +12,7 @@ With this extension, you can:
 - Create a starter eval scaffold for a customization.
 - Run the eval and save the results to a JSON file.
 - Open and review the saved results.
-- Download and configure a local waza binary.
+- Download and configure a local Waza binary.
 
 ## Prerequisites
 
@@ -20,9 +20,9 @@ With this extension, you can:
    - Marketplace: https://marketplace.visualstudio.com/items?itemName=ms-vscode.vscode-chat-customizations-evaluations
    - Extension ID: `ms-vscode.vscode-chat-customizations-evaluations`
 - A customization file in your workspace (for example, SKILL.md).
-- A working waza command.
+- A working Waza command.
 
-How to verify your waza command is working:
+How to verify your Waza command is working:
 1. Check your configured command in setting `chatCustomizationsEvaluations.waza.command` (default: `waza`).
 2. In a terminal, run `waza --version` (or run the configured command with `--version`).
 3. If it is missing, run VS Code command `Chat Customizations Evaluations: Download Waza Binary` and try again.
@@ -46,7 +46,7 @@ Open the Command Palette and run these commands:
 - `Chat Customizations Evaluations: Open Waza User Guide`
    - Use when you want a quick reference for eval setup, run flow, and graders.
 - `Chat Customizations Evaluations: Download Waza Binary`
-   - Use when waza is not on your PATH, or you want the extension to use a managed binary.
+   - Use when Waza is not on your PATH, or you want the extension to use a managed binary.
 - `Chat Customizations Evaluations: Create Waza Eval Scaffold` (or `Create Waza Eval Scaffold For SKILL File`)
    - Use to generate starter eval files (`wazaEval.yaml` plus starter tasks) for the current skill/customization context.
 - `Chat Customizations Evaluations: Run Waza Evaluation` (or `Run Waza Evaluation For SKILL File`)
@@ -60,9 +60,9 @@ When you run "Run Waza Evaluation", the extension does the following:
     - Finds the nearest supported customization context and resolves the related skill context.
     - In practice, this is anchored to the nearest `SKILL.md` discovered from the current file/context.
     - Determines skill name and workspace root.
-2. Searches for a waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support) in common locations.
+2. Searches for a Waza eval file (`wazaEval.yaml`, with legacy `eval.yaml` support) in common locations.
 3. Creates a timestamped results output file path in extension storage.
-4. Runs waza:
+4. Runs Waza:
 
 ```bash
 waza run <wazaEval.yaml> --context-dir <skill-dir> --output <results-file.json>
@@ -96,11 +96,11 @@ Based on `waza/docs/graders`, the documented grader types are:
 - `tool_constraint`
 - `trigger`
 
-For current runs, use implemented grader types. If you use one marked "not implemented", waza will fail to create or run that grader.
+For current runs, use implemented grader types. If you use one marked "not implemented", Waza will fail to create or run that grader.
 
 About availability plans for "not implemented" grader types:
 - This extension does not define a release timeline for those grader implementations.
-- For updates, track the waza repository releases/issues: https://github.com/microsoft/waza
+- For updates, track the Waza repository releases/issues: https://github.com/microsoft/waza
 
 Examples:
 
@@ -415,9 +415,9 @@ Examples:
 
 ## Troubleshooting
 
-If you still need deeper waza details, examples, or status updates, see https://github.com/microsoft/waza
+If you still need deeper Waza details, examples, or status updates, see https://github.com/microsoft/waza
 
-### "No waza eval file found"
+### "No Waza eval file found"
 
 Create an eval scaffold first with:
 - Chat Customizations Evaluations: Create Waza Eval Scaffold
@@ -435,7 +435,7 @@ Open the output panel:
 - View > Output
 - Channel: Chat Customizations Evaluations
 
-Read the exact waza command, stderr, and fallback behavior logs.
+Read the exact Waza command, stderr, and fallback behavior logs.
 
 ## Notes
 

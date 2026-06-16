@@ -2,12 +2,22 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LLMAnalyzer } from '../analyzers/llm';
 import { extractJSON, findTextRange } from '../analyzers/llm-utils';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import type { AnalysisResult } from '../types';
+
+interface LLMAnalyzerInternals {
+  normalizeDiagnosticMessage(message: string): string;
+  diagnosticMessagesOverlap(a: string, b: string): boolean;
+  filterPreviouslyReportedDiagnostics(results: AnalysisResult[], previousDiagnosticMessages?: string[]): AnalysisResult[];
+  formatResponsePreview(text: string): string;
+}
 
 describe('LLMAnalyzer', () => {
   let analyzer: LLMAnalyzer;
+  let analyzerInternals: LLMAnalyzerInternals;
 
   beforeEach(() => {
     analyzer = new LLMAnalyzer();
+    analyzerInternals = analyzer as unknown as LLMAnalyzerInternals;
   });
 
   describe('isAvailable', () => {
@@ -431,20 +441,20 @@ describe('LLMAnalyzer', () => {
 
   describe('private methods', () => {
     it('normalizeDiagnosticMessage should lowercase and trim messages', () => {
-      const result = (analyzer as any).normalizeDiagnosticMessage('  "HELLO World"  ');
+      const result = analyzerInternals.normalizeDiagnosticMessage('  "HELLO World"  ');
       expect(result).toBe('hello world');
     });
 
     it('diagnosticMessagesOverlap should return true for identical messages', () => {
-      expect((analyzer as any).diagnosticMessagesOverlap('hello world', 'hello world')).toBe(true);
+      expect(analyzerInternals.diagnosticMessagesOverlap('hello world', 'hello world')).toBe(true);
     });
 
     it('diagnosticMessagesOverlap should return true when one contains the other', () => {
-      expect((analyzer as any).diagnosticMessagesOverlap('hello world foo bar', 'hello world')).toBe(true);
+      expect(analyzerInternals.diagnosticMessagesOverlap('hello world foo bar', 'hello world')).toBe(true);
     });
 
     it('diagnosticMessagesOverlap should return false for unrelated messages', () => {
-      expect((analyzer as any).diagnosticMessagesOverlap('first message', 'second message')).toBe(false);
+      expect(analyzerInternals.diagnosticMessagesOverlap('first message', 'second message')).toBe(false);
     });
 
     it('filterPreviouslyReportedDiagnostics should filter out matching diagnostics', () => {
@@ -452,7 +462,7 @@ describe('LLMAnalyzer', () => {
         { code: 'test', message: 'Contradiction: "A" conflicts with "B".', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' },
         { code: 'test', message: 'Ambiguous: "C". Suggestion: D', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' },
       ];
-      const filtered = (analyzer as any).filterPreviouslyReportedDiagnostics(results, [
+      const filtered = analyzerInternals.filterPreviouslyReportedDiagnostics(results, [
         'Contradiction: "A" conflicts with "B".',
       ]);
       expect(filtered).toHaveLength(1);
@@ -461,18 +471,18 @@ describe('LLMAnalyzer', () => {
 
     it('filterPreviouslyReportedDiagnostics should return all results when no previous diagnostics', () => {
       const results = [{ code: 'test', message: 'Some issue', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, analyzer: 'test' }];
-      const filtered = (analyzer as any).filterPreviouslyReportedDiagnostics(results, undefined);
+      const filtered = analyzerInternals.filterPreviouslyReportedDiagnostics(results, undefined);
       expect(filtered).toHaveLength(1);
     });
 
     it('formatResponsePreview should return short text as-is', () => {
-      const result = (analyzer as any).formatResponsePreview('Hello');
+      const result = analyzerInternals.formatResponsePreview('Hello');
       expect(result).toBe('Hello');
     });
 
     it('formatResponsePreview should truncate long text with ellipsis', () => {
       const longText = 'x'.repeat(400);
-      const result = (analyzer as any).formatResponsePreview(longText);
+      const result = analyzerInternals.formatResponsePreview(longText);
       expect(result.length).toBe(303);
       expect(result.endsWith('...')).toBe(true);
     });

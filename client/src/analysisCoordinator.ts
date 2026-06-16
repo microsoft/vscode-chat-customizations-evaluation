@@ -6,11 +6,8 @@ import {
     ACTION_FIX_DIAGNOSTICS
 } from './strings';
 import type {
-    AnalysisSnapshot,
-    AnalysisState, CustomDiagnosticConfig
+    AnalysisSnapshot, CustomDiagnosticConfig
 } from './types';
-
-const STATUS_BAR_COMPLETION_DURATION_MS = 5000;
 
 export class AnalysisCoordinator {
 
@@ -21,27 +18,15 @@ export class AnalysisCoordinator {
 
     private readonly urisWithDiagnostics = new Set<string>();
     private readonly pendingAnalysisUris = new Set<string>();
-    private readonly analysisStatesByUri = new Map<string, AnalysisState>();
     private readonly analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
-    private statusBarItem: vscode.StatusBarItem | undefined;
-    private statusBarCompletionMessage: string | undefined;
-    private statusBarCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 
     initialize(context: vscode.ExtensionContext): void {
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
-        this.statusBarItem.name = 'Chat Customizations Evaluations Analysis Status';
-        context.subscriptions.push(this.statusBarItem);
         context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
-            this.updateAnalysisStatusBar();
             this.updateHasDiagnosticsContext();
         }));
     }
 
     dispose(): void {
-        if (this.statusBarCompletionTimer) {
-            clearTimeout(this.statusBarCompletionTimer);
-            this.statusBarCompletionTimer = undefined;
-        }
     }
 
     isAnalysisPending(uri: vscode.Uri): boolean {
@@ -49,74 +34,8 @@ export class AnalysisCoordinator {
     }
 
     beginAnalysis(uri: string): void {
-        const existingState = this.analysisStatesByUri.get(uri);
-        if (existingState?.resolveProgress) {
-            existingState.resolveProgress();
-        }
-
         this.pendingAnalysisUris.add(uri);
-        this.analysisStatesByUri.set(uri, {
-            startedAt: Date.now(),
-            stage: 'Starting analysis...',
-            llmRequestsInFlight: 0,
-        });
         this.updateIsAnalyzingContext();
-        this.startProgressNotification(uri);
-        this.updateAnalysisStatusBar();
-    }
-
-    markAnalysisStage(uri: string, stage: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state) {
-            return;
-        }
-
-        state.stage = stage;
-        this.updateProgressNotificationMessage(uri);
-        this.updateAnalysisStatusBar();
-    }
-
-    markAnalysisStageWithRequestCount(uri: string, stage: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state) {
-            return;
-        }
-
-        const requestScope = state.llmRequestsInFlight > 1
-            ? ` (${state.llmRequestsInFlight} requests in flight)`
-            : '';
-        state.stage = `${stage}${requestScope}`;
-        this.updateProgressNotificationMessage(uri);
-        this.updateAnalysisStatusBar();
-    }
-
-    markLLMRequestStart(uri: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state) {
-            return;
-        }
-
-        state.llmRequestsInFlight += 1;
-        const requestCount = state.llmRequestsInFlight;
-        state.stage = requestCount > 1
-            ? `Connecting to Copilot... (${requestCount} requests in flight)`
-            : 'Connecting to Copilot...';
-        this.updateProgressNotificationMessage(uri);
-        this.updateAnalysisStatusBar();
-    }
-
-    markLLMRequestDone(uri: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state) {
-            return;
-        }
-
-        state.llmRequestsInFlight = Math.max(0, state.llmRequestsInFlight - 1);
-        state.stage = state.llmRequestsInFlight > 0
-            ? 'Waiting for Copilot responses...'
-            : 'Finalizing diagnostics...';
-        this.updateProgressNotificationMessage(uri);
-        this.updateAnalysisStatusBar();
     }
 
     handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
@@ -127,9 +46,6 @@ export class AnalysisCoordinator {
                 this.urisWithDiagnostics.add(uriKey);
             } else {
                 this.urisWithDiagnostics.delete(uriKey);
-            }
-            if (this.pendingAnalysisUris.has(uriKey)) {
-                this.markDiagnosticsFound(uri, diagnostics.length);
             }
         }
         this.updateHasDiagnosticsContext();
@@ -184,33 +100,14 @@ export class AnalysisCoordinator {
 
     async completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
         const uriKey = uri.toString();
-        const state = this.analysisStatesByUri.get(uriKey);
-        if (state?.resolveProgress) {
-            state.resolveProgress();
-        }
         this.pendingAnalysisUris.delete(uriKey);
-        this.analysisStatesByUri.delete(uriKey);
         this.updateIsAnalyzingContext();
-
-        const issueCount = result.resultCount;
-        this.statusBarCompletionMessage = issueCount > 0
-            ? `$(check) ${this.formatIssueSummary(issueCount)}`
-            : '$(check) No issues';
-        if (this.statusBarCompletionTimer) {
-            clearTimeout(this.statusBarCompletionTimer);
-        }
-        this.statusBarCompletionTimer = setTimeout(() => {
-            this.statusBarCompletionMessage = undefined;
-            this.statusBarCompletionTimer = undefined;
-            this.updateAnalysisStatusBar();
-        }, STATUS_BAR_COMPLETION_DURATION_MS);
-        this.updateAnalysisStatusBar();
 
         // Open Problems as soon as analysis finishes so results are visible without another click.
         await vscode.commands.executeCommand('workbench.actions.view.problems');
 
         const filename = path.basename(uri.fsPath);
-        const durationText = state ? ` in ${this.formatDurationMs(result.duration)}` : '';
+        const durationText = ` in ${this.formatDurationMs(result.duration)}`;
         if (result.resultCount === 0) {
             void vscode.window.showInformationMessage(`Analysis of ${filename} complete${durationText}: no issues found.`);
             return;
@@ -228,35 +125,6 @@ export class AnalysisCoordinator {
         return `${seconds}s`;
     }
 
-    private updateAnalysisStatusBar(): void {
-        if (!this.statusBarItem) {
-            return;
-        }
-        const runningCount = this.analysisStatesByUri.size;
-        if (runningCount === 0) {
-            if (this.statusBarCompletionMessage) {
-                this.statusBarItem.text = this.statusBarCompletionMessage;
-                this.statusBarItem.command = 'workbench.actions.view.problems';
-                this.statusBarItem.tooltip = 'Click to open Problems panel';
-                this.statusBarItem.show();
-            } else {
-                this.statusBarItem.command = undefined;
-                this.statusBarItem.hide();
-            }
-            return;
-        }
-
-        const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
-        const activeState = activeUri ? this.analysisStatesByUri.get(activeUri) : undefined;
-        const fallbackState = activeState ?? this.analysisStatesByUri.values().next().value as AnalysisState;
-        const scope = runningCount > 1 ? ` (${runningCount} files)` : '';
-
-        this.statusBarItem.text = `$(sync~spin) Analyze: ${fallbackState.stage}${scope}`;
-        this.statusBarItem.command = undefined;
-        this.statusBarItem.tooltip = 'Chat Customizations Evaluations analysis in progress';
-        this.statusBarItem.show();
-    }
-
     private updateIsAnalyzingContext(): void {
         void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.pendingAnalysisUris.size > 0);
     }
@@ -265,53 +133,6 @@ export class AnalysisCoordinator {
         const editor = vscode.window.activeTextEditor;
         const hasDiagnostics = editor ? this.urisWithDiagnostics.has(editor.document.uri.toString()) : false;
         void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.hasDiagnostics', hasDiagnostics);
-    }
-
-    private updateProgressNotificationMessage(uri: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state?.progressReporter) {
-            return;
-        }
-
-        state.progressReporter.report({ message: state.stage });
-    }
-
-    private startProgressNotification(uri: string): void {
-        const state = this.analysisStatesByUri.get(uri);
-        if (!state) {
-            return;
-        }
-        vscode.window.withProgress(
-            {
-                location: vscode.ProgressLocation.Notification,
-                title: 'Running prompt analysis',
-                cancellable: false,
-            },
-            async (progress) => {
-                const currentState = this.analysisStatesByUri.get(uri);
-                if (!currentState) {
-                    return;
-                }
-
-                currentState.progressReporter = progress;
-                progress.report({ message: currentState.stage });
-
-                await new Promise<void>((resolve) => {
-                    currentState.resolveProgress = resolve;
-                });
-            }
-        );
-    }
-
-    private markDiagnosticsFound(uri: vscode.Uri, count: number): void {
-        const uriKey = uri.toString();
-        const state = this.analysisStatesByUri.get(uriKey);
-        if (!state) {
-            return;
-        }
-        state.stage = `Collecting results: ${this.formatIssueSummary(count)}`;
-        this.updateProgressNotificationMessage(uriKey);
-        this.updateAnalysisStatusBar();
     }
 
     private computeAnalysisFingerprint(document: vscode.TextDocument, customDiagnostics?: CustomDiagnosticConfig[]): string {

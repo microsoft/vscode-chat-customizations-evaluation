@@ -54,7 +54,7 @@ You can also trigger analysis from Copilot Chat with the slash command `/analyze
 | `/analyze-prompt` | Run analysis for the active customization file and summarize diagnostics in chat |
 | `Chat Customizations Evaluations: Create Waza Eval Scaffold` | Create `wazaEval.yaml` and task files for the active skill |
 | `Chat Customizations Evaluations: Run Waza Evaluation` | Run the skill's eval suite |
-| `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific waza binary and configure the extension to use it |
+| `Chat Customizations Evaluations: Download Waza Binary` | Download the latest platform-specific Waza binary and configure the extension to use it |
 | `Chat Customizations Evaluations: Open Analysis and Fix User Guide` | Open the analysis and fix workflow guide |
 
 ### Guides
@@ -69,11 +69,11 @@ You can also trigger analysis from Copilot Chat with the slash command `/analyze
 | `chatCustomizationsEvaluations.enable` | `true` | Enable/disable the extension |
 | `chatCustomizationsEvaluations.trace.server` | `off` | Trace communication between VS Code and the language server |
 | `chatCustomizationsEvaluations.customDiagnostics` | `[]` | Array of custom diagnostic objects with `name` and `description` fields |
-| `chatCustomizationsEvaluations.waza.command` | `waza` | Command used to run waza (for example `/usr/local/bin/waza`) |
+| `chatCustomizationsEvaluations.waza.command` | `waza` | Command used to run Waza (for example `/usr/local/bin/waza`) |
 
 ### Telemetry
 
-The extension now emits usage telemetry events for activation, analysis commands, diagnostics fixes, and waza workflows.
+The extension now emits usage telemetry events for activation, analysis commands, diagnostics fixes, and Waza workflows.
 
 - Telemetry is gated by VS Code telemetry settings.
 - Events only include coarse metadata (for example counts, durations, and success/failure outcomes).

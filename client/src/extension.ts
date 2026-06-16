@@ -27,6 +27,8 @@ import type {
 import { findSkillFilePath, inferSkillProjectRoot } from './waza/wazaUtils';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { ExtensionTelemetrySender } from './telemetry';
+import { UrlResolver } from './urlResolver';
+import { ModelPicker } from './modelPicker';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
@@ -39,12 +41,12 @@ class ExtensionRuntime {
 
   private client: LanguageClient | undefined;
   private outputChannel!: vscode.OutputChannel;
-  private cachedModel: vscode.LanguageModelChat | undefined;
-  private modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
+  private modelPicker!: ModelPicker;
   private extensionContext!: vscode.ExtensionContext;
   private telemetryLogger: vscode.TelemetryLogger | undefined;
   private analysisCoordinator!: AnalysisCoordinator;
   private extensionDiagnosticCollection!: vscode.DiagnosticCollection;
+  private readonly urlResolver = new UrlResolver();
   private readonly pendingDiagnosticEditsByUri = new Map<string, { fullDocument: boolean; ranges: vscode.Range[] }>();
   private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
 
@@ -93,6 +95,7 @@ class ExtensionRuntime {
       (diagnostic) => this.isNonFixableDiagnostic(diagnostic),
     );
     this.analysisCoordinator.initialize(context);
+    this.modelPicker = new ModelPicker(this.outputChannel);
 
     this.telemetryLogger = this.createExtensionTelemetryLogger(context);
     context.subscriptions.push(this.telemetryLogger);
@@ -103,7 +106,7 @@ class ExtensionRuntime {
     initializeWaza({
       extensionContext: this.extensionContext,
       outputChannel: this.outputChannel,
-      getCustomizationUri: (obj) => this.getCustomizationUri(obj),
+      getCustomizationUri: (obj) => this.urlResolver.getCustomizationUri(obj),
       requestLLM: async (request) => this.handleLLMProxyRequest(request),
       logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
       logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
@@ -185,7 +188,6 @@ class ExtensionRuntime {
     });
 
     this.client.onRequest(LLMRequestType, async (request: LLMProxyRequest): Promise<LLMProxyResponse> => {
-      this.analysisCoordinator?.markLLMRequestStart(request.uri);
       this.outputChannel.appendLine('[LLM Proxy] Received request from server');
       try {
         const result = await this.handleLLMProxyRequest(request);
@@ -195,8 +197,9 @@ class ExtensionRuntime {
           this.outputChannel.appendLine(`[LLM Proxy] Success (${result.text.length} chars)`);
         }
         return result;
-      } finally {
-        this.analysisCoordinator?.markLLMRequestDone(request.uri);
+      } catch (error) {
+        this.outputChannel.appendLine(`[LLM Proxy] Unexpected error: ${error}`);
+        throw error;
       }
     });
   }
@@ -217,14 +220,14 @@ class ExtensionRuntime {
     this.outputChannel.appendLine('[Code Actions] Registering code action provider');
     context.subscriptions.push(
       vscode.languages.registerCodeActionsProvider(documentSelector, {
-        provideCodeActions: (document, range, context) => this.provideCodeActions(document, range, context),
+        provideCodeActions: (document, range) => this.provideCodeActions(document, range),
       }, {
         providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
       }),
     );
   }
 
-  private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, context: vscode.CodeActionContext): vscode.CodeAction[] {
+  private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection): vscode.CodeAction[] {
     const allDiagnostics = this.getExtensionDiagnostics(document.uri);
     const fixableDiagnostics = allDiagnostics.filter(
       d => !this.isNonFixableDiagnostic(d) && this.rangesOverlap(d.range, range),
@@ -264,8 +267,7 @@ class ExtensionRuntime {
   private registerModelHandlers(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.lm.onDidChangeChatModels(() => {
-        this.cachedModel = undefined;
-        this.modelSelectionPromise = undefined;
+        this.modelPicker.clearCache();
       })
     );
   }
@@ -309,85 +311,6 @@ class ExtensionRuntime {
     });
   }
 
-  private isUriLike(value: unknown): value is vscode.Uri {
-    if (!value || typeof value !== 'object') {
-      return false;
-    }
-
-    const candidate = value as {
-      scheme?: unknown;
-      path?: unknown;
-      toString?: unknown;
-    };
-
-    return (
-      typeof candidate.scheme === 'string'
-      && typeof candidate.path === 'string'
-      && typeof candidate.toString === 'function'
-    );
-  }
-
-  private toUri(value: unknown): vscode.Uri | undefined {
-    if (!value) {
-      return undefined;
-    }
-
-    if (this.isUriLike(value)) {
-      return value;
-    }
-
-    if (typeof value === 'string') {
-      try {
-        return vscode.Uri.parse(value);
-      } catch {
-        return undefined;
-      }
-    }
-
-    if (typeof value === 'object') {
-      const candidate = value as {
-        scheme?: unknown;
-        path?: unknown;
-        authority?: unknown;
-        query?: unknown;
-        fragment?: unknown;
-      };
-      if (typeof candidate.scheme === 'string' && typeof candidate.path === 'string') {
-        return vscode.Uri.from({
-          scheme: candidate.scheme,
-          path: candidate.path,
-          authority: typeof candidate.authority === 'string' ? candidate.authority : '',
-          query: typeof candidate.query === 'string' ? candidate.query : '',
-          fragment: typeof candidate.fragment === 'string' ? candidate.fragment : '',
-        });
-      }
-    }
-
-    return undefined;
-  }
-
-  private getCustomizationUri(obj: unknown): vscode.Uri | undefined {
-    if (!obj || typeof obj !== 'object') {
-      return undefined;
-    }
-
-    const arg = obj as {
-      uri?: unknown;
-      resourceUri?: unknown;
-      item?: {
-        uri?: unknown;
-        resourceUri?: unknown;
-      };
-    };
-
-    return (
-      this.toUri(arg.uri)
-      ?? this.toUri(arg.resourceUri)
-      ?? this.toUri(arg.item?.uri)
-      ?? this.toUri(arg.item?.resourceUri)
-    );
-  }
-
   private registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
@@ -399,7 +322,7 @@ class ExtensionRuntime {
 
   private async handleAnalyzePromptUsingSlashCommand(obj?: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePromptUsingSlashCommand');
-    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri) {
       this.logTelemetryUsage('command/analyzePromptUsingSlashCommand/result', { outcome: 'noActiveEditor' });
       return;
@@ -410,7 +333,7 @@ class ExtensionRuntime {
 
   private async handleAnalyzePromptCommand(obj?: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePrompt', { source: 'activeEditor' });
-    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri) {
       this.logTelemetryUsage('command/analyzePrompt/result', { outcome: 'noActiveEditor' });
       return;
@@ -485,7 +408,7 @@ class ExtensionRuntime {
   private async handleAnalyzePromptFromCustomizationCommand(obj: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePromptFromCustomization');
     this.outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
-    const uri = this.getCustomizationUri(obj);
+    const uri = this.urlResolver.getCustomizationUri(obj);
     if (!uri) {
       this.outputChannel.appendLine('[Analyze Prompt From Customization] Missing URI in command arguments');
       this.logTelemetryUsage('command/analyzePromptFromCustomization/result', { outcome: 'missingUri' });
@@ -575,7 +498,6 @@ class ExtensionRuntime {
     revealDocumentAfterSuccess: boolean;
   }): Promise<void> {
     this.analysisCoordinator.beginAnalysis(options.uri.toString());
-    this.analysisCoordinator.markAnalysisStage(options.uri.toString(), 'Submitting analysis request...');
 
     try {
       const result = await this.sendAnalyzeRequest(options.analyzeRequest);
@@ -786,6 +708,7 @@ class ExtensionRuntime {
         ` - lineText: ${lineText}`,
         ` - message: ${message || 'n/a'}`,
         ...(shouldIncludeSuggestion ? [`  suggestion: ${suggestion}`] : []),
+        `\n`
       ].join('\n');
     }).join('\n');
 
@@ -809,7 +732,7 @@ class ExtensionRuntime {
   }
 
   private resolveSkillContext(obj: unknown): SkillContext | undefined {
-    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri || uri.scheme !== 'file') {
       return undefined;
     }
@@ -859,115 +782,31 @@ class ExtensionRuntime {
     });
   }
 
-  private async selectModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
-    if (this.cachedModel) {
-      return this.cachedModel;
-    }
-    if (this.modelSelectionPromise) {
-      return this.modelSelectionPromise;
-    }
 
-    this.modelSelectionPromise = this.doSelectModel(analysisUri);
-    try {
-      return await this.modelSelectionPromise;
-    } finally {
-      this.modelSelectionPromise = undefined;
-    }
-  }
-
-  private async doSelectModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
-    if (!vscode.lm || !vscode.lm.selectChatModels) {
-      return undefined;
-    }
-
-    const userSelectedModel = await this.trySelectUserConfiguredModel(analysisUri);
-    if (userSelectedModel) {
-      this.cachedModel = userSelectedModel;
-      return userSelectedModel;
-    }
-
-    const fallbackModel = await this.selectFallbackModel(analysisUri);
-    if (!fallbackModel) {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'No model available.');
-      return undefined;
-    }
-
-    this.cachedModel = fallbackModel;
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using model: ${this.cachedModel.name}`);
-    this.outputChannel.appendLine(`[LLM Proxy] Using model: ${this.cachedModel.name} (${this.cachedModel.vendor}/${this.cachedModel.family})`);
-    return this.cachedModel;
-  }
-
-  private async trySelectUserConfiguredModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
-    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
-    const userModel = configuration.get<string>('model', '').trim();
-    if (!userModel) {
-      return undefined;
-    }
-
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Looking for user-selected model: ${userModel}`);
-    this.outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
-    const models = await vscode.lm.selectChatModels({ family: userModel });
-    this.outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
-    if (models.length > 0) {
-      const selectedModel = models[0];
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Using user-selected model: ${selectedModel.name}`);
-      this.outputChannel.appendLine(`[LLM Proxy] Using user-selected model: ${selectedModel.name} (${selectedModel.vendor}/${selectedModel.family})`);
-      return selectedModel;
-    }
-
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'User model not found, falling back to default selection...');
-    return undefined;
-  }
-
-  private async selectFallbackModel(analysisUri: string): Promise<vscode.LanguageModelChat | undefined> {
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'Discovering Copilot models (claude-sonnet-4.6)...');
-    this.outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
-
-    let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'claude-sonnet-4.6' });
-    this.outputChannel.appendLine(`[LLM Proxy] claude-sonnet-4.6 models found: ${models.length}`);
-
-    if (models.length === 0) {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'No claude-sonnet-4.6 model found, trying any Copilot model...');
-      models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-      this.outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
-    }
-
-    if (models.length === 0) {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'No Copilot-only match, trying all available models...');
-      models = await vscode.lm.selectChatModels();
-      this.outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
-    }
-
-    return models[0];
-  }
 
   private async handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxyResponse> {
     const cts = new vscode.CancellationTokenSource();
     const timeout = setTimeout(() => cts.cancel(), ExtensionRuntime.LLM_REQUEST_TIMEOUT_MS);
     try {
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Preparing Copilot request payload...');
-      const model = await this.selectModel(request.uri);
+      const model = await this.modelPicker.selectModel();
 
       if (!model) {
         return { text: '{}', error: 'No language models available - sign in to GitHub Copilot' };
+      } else {
+        this.outputChannel.appendLine(`[LLM Proxy] Selected model: ${model.name} (${model.vendor}/${model.family})`);
       }
 
       const messages = this.buildLLMProxyMessages(request);
 
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Sending request to Copilot...');
       const response = await model.sendRequest(messages, {}, cts.token);
 
-      const text = await this.collectStreamedResponseText(response, request.uri);
+      const text = await this.collectStreamedResponseText(response);
 
       if (!text.trim()) {
         const error = 'Language model returned an empty response.';
         this.outputChannel.appendLine(`[LLM Proxy] Error: ${error}`);
         return { text: '', error };
       }
-
-      this.analysisCoordinator?.markAnalysisStageWithRequestCount(request.uri, 'Processing Copilot response...');
-
       return { text };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -987,20 +826,12 @@ class ExtensionRuntime {
 
   private async collectStreamedResponseText(
     response: vscode.LanguageModelChatResponse,
-    analysisUri: string,
   ): Promise<string> {
-    this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, 'Streaming Copilot response...');
 
     let text = '';
-    let chunkCount = 0;
     for await (const part of response.text) {
       text += part;
-      chunkCount += 1;
-      if (chunkCount <= 3 || chunkCount % 10 === 0) {
-        this.analysisCoordinator?.markAnalysisStageWithRequestCount(analysisUri, `Streaming Copilot response (chunk ${chunkCount})...`);
-      }
     }
-
     return text;
   }
 }
