@@ -26,6 +26,7 @@ import type {
 } from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { ExtensionTelemetrySender } from './telemetry';
+import { ModelPicker } from './modelPicker';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
@@ -38,8 +39,7 @@ class ExtensionRuntime {
 
   private client: LanguageClient | undefined;
   private outputChannel!: vscode.OutputChannel;
-  private cachedModel: vscode.LanguageModelChat | undefined;
-  private modelSelectionPromise: Promise<vscode.LanguageModelChat | undefined> | undefined;
+  private modelPicker!: ModelPicker;
   private extensionContext!: vscode.ExtensionContext;
   private telemetryLogger: vscode.TelemetryLogger | undefined;
   private analysisCoordinator!: AnalysisCoordinator;
@@ -92,6 +92,7 @@ class ExtensionRuntime {
       (diagnostic) => this.isNonFixableDiagnostic(diagnostic),
     );
     this.analysisCoordinator.initialize(context);
+    this.modelPicker = new ModelPicker(this.outputChannel);
 
     this.telemetryLogger = this.createExtensionTelemetryLogger(context);
     context.subscriptions.push(this.telemetryLogger);
@@ -263,8 +264,7 @@ class ExtensionRuntime {
   private registerModelHandlers(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.lm.onDidChangeChatModels(() => {
-        this.cachedModel = undefined;
-        this.modelSelectionPromise = undefined;
+        this.modelPicker.clearCache();
       })
     );
   }
@@ -889,85 +889,13 @@ class ExtensionRuntime {
     });
   }
 
-  private async selectModel(): Promise<vscode.LanguageModelChat | undefined> {
-    if (this.cachedModel) {
-      return this.cachedModel;
-    }
-    if (this.modelSelectionPromise) {
-      return this.modelSelectionPromise;
-    }
-    this.modelSelectionPromise = this.doSelectModel();
-    try {
-      return await this.modelSelectionPromise;
-    } finally {
-      this.modelSelectionPromise = undefined;
-    }
-  }
 
-  private async doSelectModel(): Promise<vscode.LanguageModelChat | undefined> {
-    if (!vscode.lm || !vscode.lm.selectChatModels) {
-      return undefined;
-    }
-
-    const userSelectedModel = await this.trySelectUserConfiguredModel();
-    if (userSelectedModel) {
-      this.cachedModel = userSelectedModel;
-      return userSelectedModel;
-    }
-
-    const fallbackModel = await this.selectFallbackModel();
-    if (!fallbackModel) {
-      return undefined;
-    }
-
-    this.cachedModel = fallbackModel;
-    this.outputChannel.appendLine(`[LLM Proxy] Using model: ${this.cachedModel.name} (${this.cachedModel.vendor}/${this.cachedModel.family})`);
-    return this.cachedModel;
-  }
-
-  private async trySelectUserConfiguredModel(): Promise<vscode.LanguageModelChat | undefined> {
-    const configuration = vscode.workspace.getConfiguration('chatCustomizationsEvaluations');
-    const userModel = configuration.get<string>('model', '').trim();
-    if (!userModel) {
-      return undefined;
-    }
-
-    this.outputChannel.appendLine(`[LLM Proxy] Looking for user-selected model: ${userModel}`);
-    const models = await vscode.lm.selectChatModels({ family: userModel });
-    this.outputChannel.appendLine(`[LLM Proxy] User model matches found: ${models.length}`);
-    if (models.length > 0) {
-      const selectedModel = models[0];
-      this.outputChannel.appendLine(`[LLM Proxy] Using user-selected model: ${selectedModel.name} (${selectedModel.vendor}/${selectedModel.family})`);
-      return selectedModel;
-    }
-
-    return undefined;
-  }
-
-  private async selectFallbackModel(): Promise<vscode.LanguageModelChat | undefined> {
-    this.outputChannel.appendLine('[LLM Proxy] Selecting chat models...');
-
-    let models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'claude-sonnet-4.6' });
-    this.outputChannel.appendLine(`[LLM Proxy] claude-sonnet-4.6 models found: ${models.length}`);
-
-    if (models.length === 0) {
-      models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-      this.outputChannel.appendLine(`[LLM Proxy] Any Copilot models found: ${models.length}`);
-    }
-
-    if (models.length === 0) {
-      models = await vscode.lm.selectChatModels();
-      this.outputChannel.appendLine(`[LLM Proxy] Any models found: ${models.length}`);
-    }
-
-    return models[0];
-  }
 
   private async handleLLMProxyRequest(request: LLMProxyRequest): Promise<LLMProxyResponse> {
     const cts = new vscode.CancellationTokenSource();
     const timeout = setTimeout(() => cts.cancel(), ExtensionRuntime.LLM_REQUEST_TIMEOUT_MS);
     try {
-      const model = await this.selectModel();
+      const model = await this.modelPicker.selectModel();
 
       if (!model) {
         return { text: '{}', error: 'No language models available - sign in to GitHub Copilot' };
