@@ -100,7 +100,25 @@ class WazaOrchestrator {
         }
 
         logTelemetryUsage('command/wazaCreateEval/result', { outcome: 'success' });
-        void vscode.window.showInformationMessage(`Created waza eval scaffold for ${skillContext.skillName}.`);
+
+        // Open the main eval file and show success notification with action
+        const evalUri = vscode.Uri.file(scaffold.evalPath);
+        await vscode.commands.executeCommand('vscode.open', evalUri);
+
+        const action = await vscode.window.showInformationMessage(
+            `✓ Created waza eval scaffold for ${skillContext.skillName}. ${scaffold.createdFiles.length} files created.`,
+            'Open Eval File',
+            'View Output'
+        );
+
+        if (action === 'Open Eval File') {
+            // Open the eval file
+            await vscode.commands.executeCommand('vscode.open', evalUri);
+        } else if (action === 'View Output') {
+            // Show the output channel to see the full details
+            const { outputChannel } = this.requireDeps();
+            outputChannel.show(true);
+        }
     }
 
     private async handleWazaRunEvalCommand(obj: unknown): Promise<void> {
