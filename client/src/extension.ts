@@ -896,7 +896,6 @@ class ExtensionRuntime {
     if (this.modelSelectionPromise) {
       return this.modelSelectionPromise;
     }
-
     this.modelSelectionPromise = this.doSelectModel();
     try {
       return await this.modelSelectionPromise;
@@ -972,6 +971,8 @@ class ExtensionRuntime {
 
       if (!model) {
         return { text: '{}', error: 'No language models available - sign in to GitHub Copilot' };
+      } else {
+        this.outputChannel.appendLine(`[LLM Proxy] Selected model: ${model.name} (${model.vendor}/${model.family})`);
       }
 
       const messages = this.buildLLMProxyMessages(request);
