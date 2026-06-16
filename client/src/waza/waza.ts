@@ -34,6 +34,7 @@ class WazaOrchestrator {
 
     private deps: WazaDependencies | undefined;
     private readonly wazaCommandExecutor: WazaCommandExecutor;
+    private readonly inProgressEvalKeys = new Set<string>();
 
     constructor() {
         this.wazaCommandExecutor = new WazaCommandExecutor({
@@ -638,19 +639,54 @@ class WazaOrchestrator {
 
     private async runWazaEvaluationForContext(context: SkillContext, evalPath: string): Promise<void> {
         const { extensionContext, outputChannel, logTelemetryUsage } = this.requireDeps();
-        outputChannel.show(true);
-        outputChannel.appendLine(`[Waza] Running evaluation for ${context.skillName}`);
-        logTelemetryUsage('waza/runEval/start');
+        const evalRunKey = this.getEvalRunKey(context, evalPath);
+        if (this.inProgressEvalKeys.has(evalRunKey)) {
+            const action = await vscode.window.showInformationMessage(
+                `Waza evaluation is already running for ${context.skillName}.`,
+                'Show Output'
+            );
+            if (action === 'Show Output') {
+                outputChannel.show(true);
+            }
+            logTelemetryUsage('waza/runEval/result', { outcome: 'alreadyRunning' });
+            return;
+        }
+
+        this.inProgressEvalKeys.add(evalRunKey);
+
+        try {
+            outputChannel.show(true);
+            outputChannel.appendLine(`[Waza] Running evaluation for ${context.skillName}`);
+            logTelemetryUsage('waza/runEval/start');
 
         const resultsFile = await this.createWazaResultsFilePath(extensionContext.globalStorageUri.fsPath, context.skillName);
         const commandLine = `${this.getWazaCommand()} run ${evalPath} --context-dir ${context.skillDirPath} --output ${resultsFile}`;
 
         outputChannel.appendLine(`[Waza] Command: ${commandLine}`);
 
-        const result = await this.runWazaCommand(
-            ['run', evalPath, '--context-dir', context.skillDirPath, '--output', resultsFile],
-            context.workspaceRoot,
-        );
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Running Waza evaluation: ${context.skillName}`,
+                    cancellable: false,
+                },
+                async (progress) => {
+                    progress.report({ message: 'Evaluation in progress...' });
+                    const interval = setInterval(() => {
+                        // Re-reporting keeps the notification visibly active while command runs.
+                        progress.report({ message: 'Evaluation in progress...' });
+                    }, 5_000);
+
+                    try {
+                        return await this.runWazaCommand(
+                            ['run', evalPath, '--context-dir', context.skillDirPath, '--output', resultsFile],
+                            context.workspaceRoot,
+                        );
+                    } finally {
+                        clearInterval(interval);
+                    }
+                }
+            );
 
         this.appendWazaCommandOutput(result, outputChannel);
 
@@ -664,12 +700,19 @@ class WazaOrchestrator {
             outputChannel.appendLine(`[Waza] Detailed output saved to: ${detailedOutputFile}\n`);
         }
 
-        if (result.exitCode !== 0) {
-            await this.handleWazaRunEvalFailure(context, evalPath, result, detailedOutputFile);
-            return;
-        }
+            if (result.exitCode !== 0) {
+                await this.handleWazaRunEvalFailure(context, evalPath, result, detailedOutputFile);
+                return;
+            }
 
-        await this.handleWazaRunEvalSuccess(context, evalPath, resultsFile, detailedOutputFile);
+            await this.handleWazaRunEvalSuccess(context, evalPath, resultsFile, detailedOutputFile);
+        } finally {
+            this.inProgressEvalKeys.delete(evalRunKey);
+        }
+    }
+
+    private getEvalRunKey(context: SkillContext, evalPath: string): string {
+        return `${context.workspaceRoot}::${context.skillDirPath}::${evalPath}`;
     }
 
     private async createWazaResultsFilePath(globalStoragePath: string, skillName: string): Promise<string> {
