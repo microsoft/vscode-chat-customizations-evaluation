@@ -27,7 +27,9 @@ export function getDiagnosticSuggestion(diagnostic: SuggestionDiagnostic): strin
         return undefined;
     }
     const suggestion = diagnostic.data.trim();
-    if (!suggestion || suggestion === diagnostic.message.trim()) {
+    const normalizedSuggestion = suggestion.replace(/\s+/g, ' ');
+    const normalizedMessage = diagnostic.message.trim().replace(/\s+/g, ' ');
+    if (!suggestion || normalizedSuggestion === normalizedMessage) {
         return undefined;
     }
     return suggestion;

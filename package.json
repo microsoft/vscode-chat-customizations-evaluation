@@ -104,6 +104,16 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically run an existing Waza eval after Implement suggestions applies improvements"
+        },
+        "chatCustomizationsEvaluations.suggestions.showQuickFixes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show quick fixes (copy suggestion, insert as comment) for diagnostics that include a suggestion."
+        },
+        "chatCustomizationsEvaluations.suggestions.showHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the suggestion text on hover for diagnostics that include a suggestion."
         }
       }
     },

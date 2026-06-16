@@ -29,6 +29,10 @@ describe('getDiagnosticSuggestion', () => {
   it('returns undefined when the suggestion equals the message (redundant)', () => {
     expect(getDiagnosticSuggestion({ message: 'Same text', data: '  Same text ' })).toBeUndefined();
   });
+
+  it('returns undefined when the suggestion only differs from the message by whitespace', () => {
+    expect(getDiagnosticSuggestion({ message: 'Same text', data: 'Same\n  text' })).toBeUndefined();
+  });
 });
 
 describe('truncateSuggestionForLabel', () => {
