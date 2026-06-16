@@ -391,9 +391,7 @@ class ExtensionRuntime {
     context.subscriptions.push(
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand({
-        obj,
-        getCustomizationUri: (target) => this.getCustomizationUri(target),
-        getActiveEditorUri: () => vscode.window.activeTextEditor?.document.uri,
+        candidateUri: this.getCustomizationUri(obj),
         logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
         logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
         resultEventName: 'command/analyzePrompt/result',

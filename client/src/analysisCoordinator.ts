@@ -52,9 +52,7 @@ export class AnalysisCoordinator {
     }
 
     async handleAnalyzePromptCommand(options: {
-        obj?: unknown;
-        getCustomizationUri: (obj?: unknown) => vscode.Uri | undefined;
-        getActiveEditorUri: () => vscode.Uri | undefined;
+        candidateUri: vscode.Uri | undefined;
         logTelemetryUsage: (eventName: string, data?: TelemetryData) => void;
         logTelemetryError: (eventName: string, error: unknown, data?: TelemetryData) => void;
         resultEventName: string;
@@ -62,7 +60,7 @@ export class AnalysisCoordinator {
     }): Promise<void> {
         options.logTelemetryUsage('command/analyzePrompt', { source: 'activeEditor' });
 
-        const uri = options.getCustomizationUri(options.obj) ?? options.getActiveEditorUri();
+        const uri = options.candidateUri ?? vscode.window.activeTextEditor?.document.uri;
         if (!uri) {
             options.logTelemetryUsage(options.resultEventName, { outcome: 'noActiveEditor' });
             return;
