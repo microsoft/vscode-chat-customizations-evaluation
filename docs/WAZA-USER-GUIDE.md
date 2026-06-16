@@ -30,7 +30,6 @@ How to verify your waza command is working:
 The extension tries these options in order:
 1. The configured command from setting `chatCustomizationsEvaluations.waza.command`.
 2. A binary downloaded by the extension.
-3. A local fallback using `go run ./cmd/waza` if a local waza repo is detected.
 
 ## Typical End-User Flow
 
