@@ -107,13 +107,13 @@ class WazaOrchestrator {
 
         const action = await vscode.window.showInformationMessage(
             `✓ Created waza eval scaffold for ${skillContext.skillName}. ${scaffold.createdFiles.length} files created.`,
-            'Show in Finder',
+            'Open Eval File',
             'View Output'
         );
 
-        if (action === 'Show in Finder') {
-            // Reveal the eval file in the file explorer
-            await vscode.commands.executeCommand('revealFileInOS', evalUri);
+        if (action === 'Open Eval File') {
+            // Open the eval file
+            await vscode.commands.executeCommand('vscode.open', evalUri);
         } else if (action === 'View Output') {
             // Show the output channel to see the full details
             const { outputChannel } = this.requireDeps();
