@@ -26,6 +26,7 @@ import type {
 } from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { ExtensionTelemetrySender } from './telemetry';
+import { UrlResolver } from './urlResolver';
 import { ModelPicker } from './modelPicker';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
@@ -43,6 +44,7 @@ class ExtensionRuntime {
   private telemetryLogger: vscode.TelemetryLogger | undefined;
   private analysisCoordinator!: AnalysisCoordinator;
   private extensionDiagnosticCollection!: vscode.DiagnosticCollection;
+  private readonly urlResolver = new UrlResolver();
   private readonly pendingDiagnosticEditsByUri = new Map<string, { fullDocument: boolean; ranges: vscode.Range[] }>();
 
   activate(context: vscode.ExtensionContext): void {
@@ -102,7 +104,7 @@ class ExtensionRuntime {
     initializeWaza({
       extensionContext: this.extensionContext,
       outputChannel: this.outputChannel,
-      getCustomizationUri: (obj) => this.getCustomizationUri(obj),
+      getCustomizationUri: (obj) => this.urlResolver.getCustomizationUri(obj),
       requestLLM: async (request) => this.handleLLMProxyRequest(request),
       logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
       logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
@@ -308,85 +310,6 @@ class ExtensionRuntime {
     });
   }
 
-  private isUriLike(value: unknown): value is vscode.Uri {
-    if (!value || typeof value !== 'object') {
-      return false;
-    }
-
-    const candidate = value as {
-      scheme?: unknown;
-      path?: unknown;
-      toString?: unknown;
-    };
-
-    return (
-      typeof candidate.scheme === 'string'
-      && typeof candidate.path === 'string'
-      && typeof candidate.toString === 'function'
-    );
-  }
-
-  private toUri(value: unknown): vscode.Uri | undefined {
-    if (!value) {
-      return undefined;
-    }
-
-    if (this.isUriLike(value)) {
-      return value;
-    }
-
-    if (typeof value === 'string') {
-      try {
-        return vscode.Uri.parse(value);
-      } catch {
-        return undefined;
-      }
-    }
-
-    if (typeof value === 'object') {
-      const candidate = value as {
-        scheme?: unknown;
-        path?: unknown;
-        authority?: unknown;
-        query?: unknown;
-        fragment?: unknown;
-      };
-      if (typeof candidate.scheme === 'string' && typeof candidate.path === 'string') {
-        return vscode.Uri.from({
-          scheme: candidate.scheme,
-          path: candidate.path,
-          authority: typeof candidate.authority === 'string' ? candidate.authority : '',
-          query: typeof candidate.query === 'string' ? candidate.query : '',
-          fragment: typeof candidate.fragment === 'string' ? candidate.fragment : '',
-        });
-      }
-    }
-
-    return undefined;
-  }
-
-  private getCustomizationUri(obj: unknown): vscode.Uri | undefined {
-    if (!obj || typeof obj !== 'object') {
-      return undefined;
-    }
-
-    const arg = obj as {
-      uri?: unknown;
-      resourceUri?: unknown;
-      item?: {
-        uri?: unknown;
-        resourceUri?: unknown;
-      };
-    };
-
-    return (
-      this.toUri(arg.uri)
-      ?? this.toUri(arg.resourceUri)
-      ?? this.toUri(arg.item?.uri)
-      ?? this.toUri(arg.item?.resourceUri)
-    );
-  }
-
   private registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
@@ -404,7 +327,7 @@ class ExtensionRuntime {
 
   private async handleAnalyzePromptUsingSlashCommand(obj?: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePromptUsingSlashCommand');
-    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri) {
       this.logTelemetryUsage('command/analyzePromptUsingSlashCommand/result', { outcome: 'noActiveEditor' });
       return;
@@ -471,7 +394,7 @@ class ExtensionRuntime {
   private async handleAnalyzePromptFromCustomizationCommand(obj: unknown): Promise<void> {
     this.logTelemetryUsage('command/analyzePromptFromCustomization');
     this.outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
-    const uri = this.getCustomizationUri(obj);
+    const uri = this.urlResolver.getCustomizationUri(obj);
     if (!uri) {
       this.outputChannel.appendLine('[Analyze Prompt From Customization] Missing URI in command arguments');
       this.logTelemetryUsage('command/analyzePromptFromCustomization/result', { outcome: 'missingUri' });
@@ -674,7 +597,7 @@ class ExtensionRuntime {
   }
 
   private resolveSkillContext(obj: unknown): SkillContext | undefined {
-    const uri = this.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
+    const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri || uri.scheme !== 'file') {
       return undefined;
     }
