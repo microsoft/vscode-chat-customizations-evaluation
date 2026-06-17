@@ -413,7 +413,7 @@ class ExtensionRuntime {
     }
     await vscode.commands.executeCommand('workbench.action.chat.newChat');
     await vscode.commands.executeCommand('workbench.action.chat.open', {
-      query: '/analyze-prompt',
+      query: `/analyze-prompt ${targetUri?.toString() ?? ''}`,
       isPartialQuery: false,
     });
   }
