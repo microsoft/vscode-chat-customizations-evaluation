@@ -779,13 +779,14 @@ class WazaOrchestrator {
 
         if (recommendationReportPath) {
             outputChannel.appendLine(`[Waza] Recommendation report saved to: ${recommendationReportPath}`);
+            outputChannel.appendLine('[Waza] The recommendation document contains AI-powered suggestions to help you fix the evaluation failures. It analyzes your skill file, evaluation tasks, and failure context to provide actionable next steps.');
             const actions: string[] = [];
             if (detailedOutputFile) {
                 actions.push('Open Detailed Output');
             }
             actions.push('Open Recommendation');
             const action = await vscode.window.showErrorMessage(
-                'Waza evaluation failed. A recommendation document was generated.',
+                'Waza evaluation failed. A recommendation document with AI-powered fix suggestions has been generated.',
                 ...actions,
             );
             if (action === 'Open Detailed Output' && detailedOutputFile) {
@@ -882,6 +883,7 @@ class WazaOrchestrator {
 
         try {
             outputChannel.appendLine(`[Waza] Generating post-eval recommendation for ${context.skillName}...`);
+            outputChannel.appendLine('[Waza] This recommendation will analyze your skill file, evaluation tasks, and failure context to suggest what should be fixed next.');
 
             const [skillContent, evalContent, taskFiles] = await Promise.all([
                 fs.promises.readFile(context.skillFilePath, 'utf8'),
@@ -947,6 +949,8 @@ class WazaOrchestrator {
                 outcome: 'success',
                 recommendationTextLength: recommendationText.length,
             });
+
+            outputChannel.appendLine(`[Waza] Recommendation successfully generated with ${recommendationText.length} characters of actionable guidance.`);
 
             return reportPath;
         } catch (error) {
@@ -1192,6 +1196,9 @@ class WazaOrchestrator {
 
         const report = [
             `# Waza Post-Eval Recommendation (${skillName})`,
+            '',
+            '## About This File',
+            'This recommendation file is generated when a Waza evaluation fails. It contains AI-powered suggestions to help you fix the issues preventing your skill evaluation from passing. The recommendations analyze your skill file, evaluation tasks, and failure context to provide actionable next steps.',
             '',
             `- Eval file: ${evalPath}`,
             `- Results file: ${resultsFile ?? 'Unavailable (evaluation failed before results were written)'}`,
