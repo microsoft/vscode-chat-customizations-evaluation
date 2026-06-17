@@ -26,7 +26,6 @@ export interface LLMProxyResponse {
 
 export type LLMProxyFn = (request: LLMProxyRequest) => Promise<LLMProxyResponse>;
 
-// Typed LLM response shapes for extractJSON
 export interface LLMContradictionResponse {
   contradictions?: {
     instruction1: string;
