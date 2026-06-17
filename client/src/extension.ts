@@ -310,9 +310,7 @@ class ExtensionRuntime {
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand({
         candidateUri: this.urlResolver.getCustomizationUri(obj),
         logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
-        logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
-        resultEventName: 'command/analyzePrompt/result',
-        revealDocumentAfterSuccess: false,
+        logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data)
       })),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async (diagnostics?: vscode.Diagnostic[]) => this.handleFixDiagnosticsCommand(diagnostics)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),
