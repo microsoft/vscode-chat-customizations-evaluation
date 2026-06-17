@@ -34,9 +34,9 @@ The extension tries these options in order:
 ## Typical End-User Flow
 
 1. Open a customization file (for example, `skills/my-skill/SKILL.md`).
-2. Run the VS Code command `Chat Customizations Evaluations: Create Waza Eval Scaffold` (or `Create Waza Eval Scaffold For SKILL File`, depending on build).
+2. Run the VS Code command `Create Waza Eval Scaffold For SKILL File` while a SKILL file is open. 
 3. Review generated eval files and tasks.
-4. Run the VS Code command `Chat Customizations Evaluations: Run Waza Evaluation` (or `Run Waza Evaluation For SKILL File`, depending on build).
+4. Run the VS Code command `Run Waza Evaluation For SKILL File` while a SKILL file is open. 
 5. Open results from the notification action or from the output panel link.
 
 ## Main Commands (Command Palette)
@@ -47,9 +47,9 @@ Open the Command Palette and run these commands:
    - Use when you want a quick reference for eval setup, run flow, and graders.
 - `Chat Customizations Evaluations: Download Waza Binary`
    - Use when Waza is not on your PATH, or you want the extension to use a managed binary.
-- `Chat Customizations Evaluations: Create Waza Eval Scaffold` (or `Create Waza Eval Scaffold For SKILL File`)
+- `Create Waza Eval Scaffold For SKILL File`
    - Use to generate starter eval files (`wazaEval.yaml` plus starter tasks) for the current skill/customization context.
-- `Chat Customizations Evaluations: Run Waza Evaluation` (or `Run Waza Evaluation For SKILL File`)
+- `Run Waza Evaluation For SKILL File`
    - Use to run the resolved eval suite and write a timestamped JSON results file.
 
 ## How Evaluation Works
