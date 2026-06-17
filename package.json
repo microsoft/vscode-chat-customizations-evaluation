@@ -176,6 +176,14 @@
           "when": "false"
         },
         {
+          "command": "chatCustomizationsEvaluations.wazaCreateEval",
+          "when": "editorLangId == skill || resourceFilename == SKILL.md"
+        },
+        {
+          "command": "chatCustomizationsEvaluations.wazaRunEval",
+          "when": "editorLangId == skill || resourceFilename == SKILL.md"
+        },
+        {
           "command": "chatCustomizationsEvaluations.wazaRunEvalFromFile",
           "when": "false"
         }
