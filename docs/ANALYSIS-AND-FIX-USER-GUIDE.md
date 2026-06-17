@@ -92,6 +92,8 @@ If fixes were applied and the file belongs to a skill context:
 
 This gives a tight loop: analyze -> fix -> validate.
 
+For detailed information on setting up, running, and troubleshooting Waza evaluations, see [Waza User Guide](WAZA-USER-GUIDE.md).
+
 ## Configuration That Affects This Flow
 
 - `chatCustomizationsEvaluations.customDiagnostics`: Adds extra LLM checks.
@@ -105,3 +107,7 @@ This gives a tight loop: analyze -> fix -> validate.
 - Keep custom diagnostics specific and testable to improve fix quality.
 - Treat Implement suggestions as a targeted rewrite pass, not a full refactor pass.
 - Use Waza evals to confirm behavior after applying fixes.
+
+## See Also
+
+- [Waza User Guide](WAZA-USER-GUIDE.md) — Complete guide to Waza evaluation setup and graders
