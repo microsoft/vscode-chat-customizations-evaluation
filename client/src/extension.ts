@@ -242,7 +242,6 @@ class ExtensionRuntime {
           return;
         }
         const removedCount = this.diagnosticsManager.handleDocumentChange(event);
-        this.analysisCoordinator?.handleDocumentContentChanged(event.document.uri);
         if (removedCount > 0) {
           this.outputChannel.appendLine(`[Diagnostics] Removed ${removedCount} touched diagnostics for ${event.document.uri.fsPath}`);
         }

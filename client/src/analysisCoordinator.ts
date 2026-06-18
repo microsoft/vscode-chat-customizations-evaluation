@@ -49,7 +49,7 @@ export class AnalysisCoordinator {
         }
 
         if (this.isAnalysisRunning(uri)) {
-            options.logTelemetryUsage(options.resultEventName, { outcome: 'alreadyRunning' });
+            options.logTelemetryUsage(resultEventName, { outcome: 'alreadyRunning' });
             return;
         }
         const result = await this.runAnalyzeWorkflow(uri);
@@ -61,9 +61,9 @@ export class AnalysisCoordinator {
     }
 
     async runAnalyzeWorkflow(uri: vscode.Uri): Promise<AnalysisWorkflowResult> {
-        const uriKey = options.uri.toString();
+        const uriKey = uri.toString();
         if (!this.queuedAnalysisUris.has(uriKey)) {
-            this.queueAnalysis(options.uri);
+            this.queueAnalysis(uri);
         }
         this.clearQueuedAnalysisTimeout(uriKey);
 
@@ -229,7 +229,6 @@ export class AnalysisCoordinator {
         analyzeRequest: AnalyzeRequest;
     }): Promise<AnalysisWorkflowResult> {
         try {
-            this.beginAnalysis(options.uri.toString());
             const result = await this.sendAnalyzeRequest(options.analyzeRequest);
             this.recordAnalysisSnapshot(options.snapshot.document, result.resultCount);
             await vscode.window.showTextDocument(options.snapshot.document, { preview: false, preserveFocus: false });
