@@ -134,5 +134,7 @@ export function resultsToDiagnostics(results: AnalysisResult[]): Diagnostic[] {
   });
 }
 
-const server = new ChatCustomizationsEvaluationServer();
-server.start();
+if (require.main === module) {
+  const server = new ChatCustomizationsEvaluationServer();
+  server.start();
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LLMAnalyzer } from '../analyzers/llm';
 import { extractJSON, findTextRange } from '../analyzers/llm-utils';
+import { resultsToDiagnostics } from '../server';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import type { AnalysisResult } from '../types';
 
@@ -410,26 +411,17 @@ describe('LLMAnalyzer', () => {
     });
   });
 
-  // Spec-only: the AnalysisResult -> Diagnostic conversion lives in the client
-  // (extension side), not in this server module, so there is no production
-  // function to import here. This documents the expected mapping shape/contract.
-  describe('AnalysisResult -> Diagnostic mapping (spec)', () => {
+  describe('resultsToDiagnostics', () => {
     it('maps AnalysisResult fields onto the Diagnostic shape', () => {
-      const results = [{
+      const results: AnalysisResult[] = [{
         code: 'contradiction',
         message: 'Test message',
         range: { start: { line: 1, character: 2 }, end: { line: 3, character: 4 } },
         analyzer: 'test-analyzer',
         suggestion: 'Try this fix',
       }];
-      const diagnostics = results.map((result) => ({
-        severity: 2,
-        range: result.range,
-        message: result.message,
-        source: 'chat-customizations-evaluations (' + result.analyzer + ')',
-        code: result.code,
-        data: result.suggestion,
-      }));
+      const diagnostics = resultsToDiagnostics(results);
+
       expect(diagnostics).toHaveLength(1);
       expect(diagnostics[0].code).toBe('contradiction');
       expect(diagnostics[0].message).toBe('Test message');
