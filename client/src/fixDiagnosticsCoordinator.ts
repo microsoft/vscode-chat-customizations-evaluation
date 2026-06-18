@@ -1,20 +1,16 @@
 import * as vscode from 'vscode';
 import { ACTION_ANALYZE_AGAIN } from './strings';
-import type { SkillContext } from './types';
-import { DiagnosticsManager } from './diagnosticsManager';
 import { handlePostFixDiagnosticsFlow } from './waza/waza';
-
-interface FixDiagnosticsCoordinatorOptions {
-  diagnosticsManager: DiagnosticsManager;
-  resolveSkillContextForUri: (uri: vscode.Uri) => SkillContext | undefined;
-}
+import { DiagnosticsManager } from './diagnosticsManager';
+import { SkillContextResolver } from './skillContextResolver';
 
 export class FixDiagnosticsCoordinator {
 
   private static readonly FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS = 5 * 60_000;
 
   constructor(
-    private readonly options: FixDiagnosticsCoordinatorOptions,
+    private readonly diagnosticsManager: DiagnosticsManager,
+    private readonly skillContextResolver: SkillContextResolver
   ) { }
 
   async handleFixDiagnosticsCommand(scopedDiagnostics?: vscode.Diagnostic[]): Promise<void> {
@@ -32,14 +28,14 @@ export class FixDiagnosticsCoordinator {
     }
 
     await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
-    this.options.diagnosticsManager.clearDiagnosticsForUri(targetUri);
+    this.diagnosticsManager.clearDiagnosticsForUri(targetUri);
 
     const hasImprovements = await this.waitForDocumentImprovements(targetUri, initialText);
     if (!hasImprovements) {
       return;
     }
 
-    const skillContext = this.options.resolveSkillContextForUri(targetUri);
+    const skillContext = this.skillContextResolver.resolveSkillContext(targetUri);
     if (!skillContext) {
       return;
     }
@@ -50,20 +46,20 @@ export class FixDiagnosticsCoordinator {
   private getFixableDiagnostics(targetUri: vscode.Uri, scopedDiagnostics?: vscode.Diagnostic[]): vscode.Diagnostic[] {
     let fixableDiagnostics: vscode.Diagnostic[];
     if (scopedDiagnostics && scopedDiagnostics.length > 0) {
-      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
     } else {
       const diagnostics = this.getSortedDiagnostics(targetUri);
       if (diagnostics.length === 0) {
         vscode.window.showInformationMessage('No diagnostics found for the active file. Run Analyze first.');
         return [];
       }
-      fixableDiagnostics = diagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = diagnostics.filter(diagnostic => !this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
     }
     return fixableDiagnostics;
   }
 
   private getSortedDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
-    return this.options.diagnosticsManager.getDiagnosticsForUri(uri)
+    return this.diagnosticsManager.getDiagnosticsForUri(uri)
       .slice()
       .sort((a, b) => {
         if (a.range.start.line !== b.range.start.line) {

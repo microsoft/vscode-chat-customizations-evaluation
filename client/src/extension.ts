@@ -81,10 +81,7 @@ class ExtensionRuntime {
     this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
     this.diagnosticsManager = new DiagnosticsManager(context);
     this.analysisCoordinator = new AnalysisCoordinator(context, this.diagnosticsManager, this.client);
-    this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator({
-      diagnosticsManager: this.diagnosticsManager,
-      resolveSkillContextForUri: (uri) => this.skillContextResolver.resolveSkillContext({ uri })
-    });
+    this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator(this.diagnosticsManager, this.skillContextResolver)
     this.modelPicker = new ModelPicker(this.outputChannel);
   }
 
