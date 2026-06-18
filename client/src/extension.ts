@@ -13,18 +13,15 @@ import {
   registerWazaCommands,
 } from './waza/waza';
 import {
-  ACTION_FIX_DIAGNOSTICS, TELEMETRY_AUTH_TOKEN_ENV,
-  TELEMETRY_ENDPOINT_ENV
+  ACTION_FIX_DIAGNOSTICS
 } from './strings';
 import type {
   LLMProxyRequest,
-  LLMProxyResponse,
-  TelemetryData
+  LLMProxyResponse
 } from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { FixDiagnosticsCoordinator } from './fixDiagnosticsCoordinator';
 import { DiagnosticsManager } from './diagnosticsManager';
-import { ExtensionTelemetrySender } from './telemetry';
 import { UrlResolver } from './urlResolver';
 import { ModelPicker } from './modelPicker';
 import { SkillContextResolver } from './skillContextResolver';
@@ -39,10 +36,10 @@ class ExtensionRuntime {
   private outputChannel!: vscode.OutputChannel;
   private modelPicker!: ModelPicker;
   private extensionContext!: vscode.ExtensionContext;
-  private telemetryLogger: vscode.TelemetryLogger | undefined;
   private analysisCoordinator!: AnalysisCoordinator;
   private fixDiagnosticsCoordinator!: FixDiagnosticsCoordinator;
   private diagnosticsManager!: DiagnosticsManager;
+
   private readonly urlResolver = new UrlResolver();
   private readonly skillContextResolver = new SkillContextResolver(this.urlResolver);
 
@@ -72,8 +69,6 @@ class ExtensionRuntime {
 
   deactivate(): Thenable<void> | undefined {
     this.analysisCoordinator?.dispose();
-    this.logTelemetryUsage('extension/deactivate');
-    this.telemetryLogger?.dispose();
     if (!this.client) {
       return undefined;
     }
@@ -93,14 +88,9 @@ class ExtensionRuntime {
     this.analysisCoordinator.initialize(context);
     this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator({
       diagnosticsManager: this.diagnosticsManager,
-      resolveSkillContextForUri: (uri) => this.skillContextResolver.resolveSkillContext({ uri }),
-      logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
+      resolveSkillContextForUri: (uri) => this.skillContextResolver.resolveSkillContext({ uri })
     });
     this.modelPicker = new ModelPicker(this.outputChannel);
-
-    this.telemetryLogger = this.createExtensionTelemetryLogger(context);
-    context.subscriptions.push(this.telemetryLogger);
-    this.logTelemetryUsage('extension/activate', { workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0 });
   }
 
   private initializeWazaRuntime(): void {
@@ -108,9 +98,7 @@ class ExtensionRuntime {
       extensionContext: this.extensionContext,
       outputChannel: this.outputChannel,
       getCustomizationUri: (obj) => this.urlResolver.getCustomizationUri(obj),
-      requestLLM: async (request) => this.handleLLMProxyRequest(request),
-      logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
-      logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data),
+      requestLLM: async (request) => this.handleLLMProxyRequest(request)
     });
   }
 
@@ -264,39 +252,9 @@ class ExtensionRuntime {
   private startLanguageClient(): void {
     this.client?.start().then(() => {
       this.outputChannel.appendLine('[Activation] Language server started successfully');
-      this.logTelemetryUsage('extension/languageServerStart', { outcome: 'success' });
     }).catch((err: Error) => {
       this.outputChannel.appendLine(`[Activation] Language server failed to start: ${err.message}`);
-      this.logTelemetryError('extension/languageServerStart', err, { outcome: 'failed' });
       this.outputChannel.show(true);
-    });
-  }
-
-  private createExtensionTelemetryLogger(context: vscode.ExtensionContext): vscode.TelemetryLogger {
-    const endpoint = process.env[TELEMETRY_ENDPOINT_ENV];
-    const authToken = process.env[TELEMETRY_AUTH_TOKEN_ENV];
-    if (!endpoint) {
-      this.outputChannel.appendLine(
-        `[Telemetry] ${TELEMETRY_ENDPOINT_ENV} is not set; telemetry events will be collected by VS Code but not exported by this extension sender.`
-      );
-    }
-    const extensionVersion = String(context.extension.packageJSON.version ?? 'unknown');
-    const sender = new ExtensionTelemetrySender(endpoint, authToken, extensionVersion, this.outputChannel);
-    return vscode.env.createTelemetryLogger(sender, {
-      additionalCommonProperties: {
-        extensionVersion,
-      },
-    });
-  }
-
-  private logTelemetryUsage(eventName: string, data?: TelemetryData): void {
-    this.telemetryLogger?.logUsage(eventName, data);
-  }
-
-  private logTelemetryError(eventName: string, error: unknown, data?: TelemetryData): void {
-    this.telemetryLogger?.logError(eventName, {
-      ...data,
-      errorMessage: error instanceof Error ? error.message : String(error),
     });
   }
 
@@ -304,9 +262,7 @@ class ExtensionRuntime {
     context.subscriptions.push(
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand({
-        candidateUri: this.urlResolver.getCustomizationUri(obj),
-        logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
-        logTelemetryError: (eventName, error, data) => this.logTelemetryError(eventName, error, data)
+        candidateUri: this.urlResolver.getCustomizationUri(obj)
       })),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async (diagnostics?: vscode.Diagnostic[]) => this.fixDiagnosticsCoordinator.handleFixDiagnosticsCommand(diagnostics)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),
@@ -314,30 +270,23 @@ class ExtensionRuntime {
   }
 
   private async handleAnalyzePromptUsingSlashCommand(obj?: unknown): Promise<void> {
-    this.logTelemetryUsage('command/analyzePromptUsingSlashCommand');
     const uri = this.urlResolver.getCustomizationUri(obj) ?? vscode.window.activeTextEditor?.document.uri;
     if (!uri) {
-      this.logTelemetryUsage('command/analyzePromptUsingSlashCommand/result', { outcome: 'noActiveEditor' });
       return;
     }
     this.analysisCoordinator.queueAnalysis(uri);
     await this.openAnalyzePromptChat(uri);
-    this.logTelemetryUsage('command/analyzePromptUsingSlashCommand/result', { outcome: 'openedChat' });
   }
 
   private async handleAnalyzePromptFromCustomizationCommand(obj: unknown): Promise<void> {
-    this.logTelemetryUsage('command/analyzePromptFromCustomization');
     this.outputChannel.appendLine(`customization obj : ${JSON.stringify(obj)}`);
     const uri = this.urlResolver.getCustomizationUri(obj);
     if (!uri) {
       this.outputChannel.appendLine('[Analyze Prompt From Customization] Missing URI in command arguments');
-      this.logTelemetryUsage('command/analyzePromptFromCustomization/result', { outcome: 'missingUri' });
-      void vscode.window.showWarningMessage('Unable to analyze prompt: no URI was provided by the customization item.');
+      vscode.window.showWarningMessage('Unable to analyze prompt: no URI was provided by the customization item.');
       return;
     }
-
     await this.openAnalyzePromptChat(uri);
-    this.logTelemetryUsage('command/analyzePromptFromCustomization/result', { outcome: 'openedChat' });
   }
 
   private async openAnalyzePromptChat(targetUri?: vscode.Uri): Promise<void> {

@@ -37,6 +37,4 @@ export interface WazaDependencies {
     outputChannel: vscode.OutputChannel;
     getCustomizationUri: (obj: unknown) => vscode.Uri | undefined;
     requestLLM: (request: LLMProxyRequest) => Promise<LLMProxyResponse>;
-    logTelemetryUsage: (eventName: string, data?: TelemetryData) => void;
-    logTelemetryError: (eventName: string, error: unknown, data?: TelemetryData) => void;
 }
