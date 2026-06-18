@@ -29,7 +29,6 @@ export interface CustomDiagnosticConfig {
 
 export interface AnalyzeRequest {
   uri: string;
-  customDiagnostics?: CustomDiagnosticConfig[];
   previousDiagnosticMessages?: string[];
 }
 
@@ -51,5 +50,27 @@ export interface CommandResult {
   stderr: string;
   exitCode: number;
 }
+
+export type AnalysisWorkflowResult =
+  | {
+    outcome: 'alreadyCurrentWithDiagnostics';
+    resultCount: number;
+  }
+  | {
+    outcome: 'success';
+    resultCount: number;
+    durationMs: number;
+  }
+  | {
+    outcome: 'failed';
+    error: unknown;
+  };
+
+export interface AnalysisDocumentSnapshot {
+  document: vscode.TextDocument;
+  diagnostics: vscode.Diagnostic[];
+  isFresh: boolean;
+  resultCount: number | undefined;
+};
 
 export type TelemetryData = Record<string, string | number | boolean | undefined>;

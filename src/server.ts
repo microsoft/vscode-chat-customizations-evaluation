@@ -20,10 +20,9 @@ import {
 } from './types';
 
 class ChatCustomizationsEvaluationServer {
-  
+
   private readonly connection = createConnection(ProposedFeatures.all);
   private readonly documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
-  private readonly staleNotificationEligibleUris = new Set<string>();
   private readonly llmAnalyzer = new LLMAnalyzer();
 
   constructor() {
@@ -94,16 +93,6 @@ class ChatCustomizationsEvaluationServer {
         return { duration: 0, resultCount: 0 };
       }
     });
-
-    this.documents.onDidChangeContent((change) => {
-      const uri = change.document.uri;
-      if (!this.staleNotificationEligibleUris.has(uri)) {
-        return;
-      }
-      this.staleNotificationEligibleUris.delete(uri);
-      // Send a custom notification to the client to show a popup dialog
-      this.connection.sendNotification('chatCustomizationsEvaluations/contentStale', {uri});
-    });
   }
 
   private async runFullAnalysis(
@@ -126,8 +115,6 @@ class ChatCustomizationsEvaluationServer {
     this.connection.console.log(`[Analysis] Sending diagnostics for ${uri}`);
     await this.connection.sendDiagnostics({ uri, diagnostics });
 
-    // Allow one stale-content notification on the next edit after analysis completes.
-    this.staleNotificationEligibleUris.add(uri);
     const duration = Date.now() - startTime;
     this.connection.console.log(`[Analysis] Completed full analysis for ${uri} in ${duration}ms with ${diagnostics.length} diagnostics`);
     return { duration, resultCount: diagnostics.length };
