@@ -177,8 +177,9 @@ Quality bar for findings:
 - If evidence is weak or ambiguous, do not include that finding.
 - It is valid to return no issues in any or all categories when the prompt is already strong.
 - The relevant text should be a whole phrase from the prompt.
+- Prefer less diagnostics over more, especially if the additional ones are not critical.
 
-Perform ALL of the following analyses:
+Perform ALL of the following analyses and report only if there is strong evidence this exists:
 
 1. **Contradictions**: Find instructions that directly conflict with each other. Explain exactly WHY they conflict and what behavior the model would exhibit.
 2. **Ambiguity**: Find vague or underspecified instructions that a model could interpret in multiple ways. Explain the different possible interpretations and suggest a concrete rewrite.
@@ -254,6 +255,7 @@ IMPORTANT:
 - Suggestions must be concrete rewrites or additions, not abstract advice.
 - Prefer precision over recall: include fewer findings rather than uncertain ones.
 - Do not force findings to fill categories; empty arrays are expected when no high-confidence issue exists.
+- Generate diagnostics only if you are HIGHLY confident and it is important and critical. It is perfectly acceptable to return an empty array. 
 - Use empty arrays [] for any category with no issues found.
 - If custom diagnostics are configured, include "custom_diagnostics" in the response (use [] when no custom issues are found).
 - You may also include "other_diagnostics" for high-confidence issues that do not fit the listed categories (use [] when none).

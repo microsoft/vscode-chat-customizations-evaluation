@@ -7,15 +7,10 @@ description: Runs Chat Customizations Evaluations analysis for the active custom
 
 ## Purpose
 
-Run Chat Customizations Evaluations analysis on the active customization file and report what was found.
-
-## Usage
-
-Invoke this skill from Copilot Chat using /analyze-prompt while a supported customization file is open.
+Run Chat Customizations Evaluations analysis on a customization file and report what was found.
 
 ## Instructions
 
-- Confirm there is an active editor with a supported customization file.
-- Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt`.
+- Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with the passed in file URL.  
 - Wait for analysis to finish.
 - Read diagnostics for the active file from the Problems panel and summarize them. 

@@ -59,8 +59,8 @@ You can also trigger analysis from Copilot Chat with the slash command `/analyze
 
 ### Guides
 
-- [Analysis and Fix User Guide](docs/ANALYSIS-AND-FIX-USER-GUIDE.md)
-- [Waza User Guide](docs/WAZA-USER-GUIDE.md)
+- **[Analysis and Fix User Guide](docs/ANALYSIS-AND-FIX-USER-GUIDE.md)** — Learn how to run analysis, interpret diagnostics, implement suggestions, and optionally run Waza evaluations.
+- **[Waza User Guide](docs/WAZA-USER-GUIDE.md)** — Set up and run Waza evaluations, configure graders, and validate your customizations.
 
 ### Configuration
 
