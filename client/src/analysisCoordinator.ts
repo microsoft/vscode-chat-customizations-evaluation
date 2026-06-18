@@ -9,11 +9,13 @@ import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
 import { DiagnosticsManager } from './diagnosticsManager';
 
 export class AnalysisCoordinator {
+    private static readonly QUEUED_ANALYSIS_TIMEOUT_MS = 60000;
 
     private static readonly MAX_PREVIOUS_DIAGNOSTICS = 10;
 
     private readonly urisWithDiagnostics = new Set<string>();
-    private readonly pendingAnalysisUris = new Set<string>();
+    private readonly queuedAnalysisUris = new Set<string>();
+    private readonly queuedAnalysisTimeoutsByUri = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
     private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
 
@@ -26,7 +28,13 @@ export class AnalysisCoordinator {
         context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateHasDiagnosticsContext()));
     }
 
-    dispose(): void { }
+    dispose(): void {
+        for (const timeout of this.queuedAnalysisTimeoutsByUri.values()) {
+            clearTimeout(timeout);
+        }
+        this.queuedAnalysisTimeoutsByUri.clear();
+        this.queuedAnalysisUris.clear();
+    }
 
     async handleAnalyzePromptCommand(options: {
         candidateUri: vscode.Uri | undefined;
@@ -39,7 +47,7 @@ export class AnalysisCoordinator {
             options.logTelemetryUsage(resultEventName, { outcome: 'noActiveEditor' });
             return;
         }
-        if (this.isAnalysisPending(uri)) {
+        if (this.isAnalysisRunning(uri)) {
             options.logTelemetryUsage(resultEventName, { outcome: 'alreadyRunning' });
             return;
         }
@@ -52,6 +60,12 @@ export class AnalysisCoordinator {
     }
 
     async runAnalyzeWorkflow(uri: vscode.Uri): Promise<AnalysisWorkflowResult> {
+        const uriKey = uri.toString();
+        if (!this.queuedAnalysisUris.has(uriKey)) {
+            this.queueAnalysis(uri);
+        }
+        this.clearQueuedAnalysisTimeout(uriKey);
+
         const previousDiagnosticMessages = this.previousDiagnosticMessagesByUri.get(uri.toString());
         const analyzeRequest = {
             uri: uri.toString(),
@@ -75,11 +89,21 @@ export class AnalysisCoordinator {
     }
 
     isAnalysisPending(uri: vscode.Uri): boolean {
-        return this.pendingAnalysisUris.has(uri.toString());
+        return this.queuedAnalysisUris.has(uri.toString());
     }
 
-    beginAnalysis(uri: string): void {
-        this.pendingAnalysisUris.add(uri);
+    queueAnalysis(uri: vscode.Uri): void {
+        const uriKey = uri.toString();
+        this.clearQueuedAnalysisTimeout(uriKey);
+
+        const timeout = setTimeout(() => {
+            this.queuedAnalysisUris.delete(uriKey);
+            this.queuedAnalysisTimeoutsByUri.delete(uriKey);
+            this.updateIsAnalyzingContext();
+        }, AnalysisCoordinator.QUEUED_ANALYSIS_TIMEOUT_MS);
+
+        this.queuedAnalysisUris.add(uriKey);
+        this.queuedAnalysisTimeoutsByUri.set(uriKey, timeout);
         this.updateIsAnalyzingContext();
     }
 
@@ -99,7 +123,7 @@ export class AnalysisCoordinator {
     handleDocumentClosed(uri: vscode.Uri): void {
         const uriKey = uri.toString();
         this.previousDiagnosticMessagesByUri.delete(uriKey);
-        this.pendingAnalysisUris.delete(uriKey);
+        this.clearQueuedAnalysis(uriKey);
         this.updateIsAnalyzingContext();
     }
 
@@ -147,7 +171,8 @@ export class AnalysisCoordinator {
 
     async completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
         const uriKey = uri.toString();
-        this.pendingAnalysisUris.delete(uriKey);
+        this.queuedAnalysisUris.delete(uriKey);
+        this.clearQueuedAnalysisTimeout(uriKey);
         this.updateIsAnalyzingContext();
 
         await vscode.commands.executeCommand('workbench.actions.view.problems');
@@ -203,7 +228,6 @@ export class AnalysisCoordinator {
         analyzeRequest: AnalyzeRequest;
     }): Promise<AnalysisWorkflowResult> {
         try {
-            this.beginAnalysis(options.uri.toString());
             const result = await this.sendAnalyzeRequest(options.analyzeRequest);
             this.recordAnalysisSnapshot(options.snapshot.document, result.resultCount);
             await vscode.window.showTextDocument(options.snapshot.document, { preview: false, preserveFocus: false });
@@ -252,7 +276,27 @@ export class AnalysisCoordinator {
     }
 
     private updateIsAnalyzingContext(): void {
-        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.pendingAnalysisUris.size > 0);
+        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.queuedAnalysisUris.size > 0);
+    }
+
+    private isAnalysisRunning(uri: vscode.Uri): boolean {
+        const uriKey = uri.toString();
+        return this.queuedAnalysisUris.has(uriKey) && !this.queuedAnalysisTimeoutsByUri.has(uriKey);
+    }
+
+    private clearQueuedAnalysis(uriKey: string): void {
+        this.queuedAnalysisUris.delete(uriKey);
+        this.clearQueuedAnalysisTimeout(uriKey);
+    }
+
+    private clearQueuedAnalysisTimeout(uriKey: string): void {
+        const timeout = this.queuedAnalysisTimeoutsByUri.get(uriKey);
+        if (!timeout) {
+            return;
+        }
+
+        clearTimeout(timeout);
+        this.queuedAnalysisTimeoutsByUri.delete(uriKey);
     }
 
     private updateHasDiagnosticsContext(): void {
