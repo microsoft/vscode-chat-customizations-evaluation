@@ -1,13 +1,12 @@
 import * as vscode from 'vscode';
 import { ACTION_ANALYZE_AGAIN } from './strings';
-import type { SkillContext, TelemetryData } from './types';
+import type { SkillContext } from './types';
 import { DiagnosticsManager } from './diagnosticsManager';
 import { handlePostFixDiagnosticsFlow } from './waza/waza';
 
 interface FixDiagnosticsCoordinatorOptions {
   diagnosticsManager: DiagnosticsManager;
   resolveSkillContextForUri: (uri: vscode.Uri) => SkillContext | undefined;
-  logTelemetryUsage: (eventName: string, data?: TelemetryData) => void;
 }
 
 export class FixDiagnosticsCoordinator {
@@ -19,58 +18,48 @@ export class FixDiagnosticsCoordinator {
   ) { }
 
   async handleFixDiagnosticsCommand(scopedDiagnostics?: vscode.Diagnostic[]): Promise<void> {
-    this.options.logTelemetryUsage('command/fixDiagnostics');
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      this.options.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noActiveEditor' });
       return;
     }
 
     const targetUri = editor.document.uri;
     const initialText = editor.document.getText();
 
-    let fixableDiagnostics: vscode.Diagnostic[];
-    if (scopedDiagnostics && scopedDiagnostics.length > 0) {
-      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
-    } else {
-      const diagnostics = this.getSortedDiagnostics(targetUri);
-
-      if (diagnostics.length === 0) {
-        this.options.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noDiagnostics' });
-        void vscode.window.showInformationMessage('No diagnostics found for the active file. Run Analyze first.');
-        return;
-      }
-
-      fixableDiagnostics = diagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
-    }
-    if (await this.handleNonFixableDiagnosticsOnly(fixableDiagnostics.length)) {
+    const fixableDiagnostics = this.getFixableDiagnostics(targetUri, scopedDiagnostics);
+    if (await this.hasNoFixableDiagnostics(fixableDiagnostics.length)) {
       return;
     }
 
     await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
     this.options.diagnosticsManager.clearDiagnosticsForUri(targetUri);
 
-    const hasImprovements = await this.waitForDocumentImprovements(
-      targetUri,
-      initialText,
-      FixDiagnosticsCoordinator.FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS,
-    );
+    const hasImprovements = await this.waitForDocumentImprovements(targetUri, initialText);
     if (!hasImprovements) {
-      this.options.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noChangesDetected' });
       return;
     }
 
     const skillContext = this.options.resolveSkillContextForUri(targetUri);
     if (!skillContext) {
-      this.options.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'noSkillContext' });
       return;
     }
 
     await handlePostFixDiagnosticsFlow(skillContext);
-    this.options.logTelemetryUsage('command/fixDiagnostics/result', {
-      outcome: 'success',
-      diagnosticsCount: fixableDiagnostics.length,
-    });
+  }
+
+  private getFixableDiagnostics(targetUri: vscode.Uri, scopedDiagnostics?: vscode.Diagnostic[]): vscode.Diagnostic[] {
+    let fixableDiagnostics: vscode.Diagnostic[];
+    if (scopedDiagnostics && scopedDiagnostics.length > 0) {
+      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+    } else {
+      const diagnostics = this.getSortedDiagnostics(targetUri);
+      if (diagnostics.length === 0) {
+        vscode.window.showInformationMessage('No diagnostics found for the active file. Run Analyze first.');
+        return [];
+      }
+      fixableDiagnostics = diagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+    }
+    return fixableDiagnostics;
   }
 
   private getSortedDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
@@ -84,12 +73,11 @@ export class FixDiagnosticsCoordinator {
       });
   }
 
-  private async handleNonFixableDiagnosticsOnly(fixableDiagnosticsCount: number): Promise<boolean> {
+  private async hasNoFixableDiagnostics(fixableDiagnosticsCount: number): Promise<boolean> {
     if (fixableDiagnosticsCount > 0) {
       return false;
     }
 
-    this.options.logTelemetryUsage('command/fixDiagnostics/result', { outcome: 'nonFixableDiagnosticsOnly' });
     const action = await vscode.window.showInformationMessage(
       'Implement suggestions is unavailable for LLM analysis error diagnostics. Run Analyze again.',
       ACTION_ANALYZE_AGAIN,
@@ -97,7 +85,6 @@ export class FixDiagnosticsCoordinator {
     if (action === ACTION_ANALYZE_AGAIN) {
       await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
     }
-
     return true;
   }
 
@@ -145,7 +132,7 @@ export class FixDiagnosticsCoordinator {
     ].join('\n\n');
   }
 
-  private waitForDocumentImprovements(uri: vscode.Uri, initialText: string, timeoutMs: number): Promise<boolean> {
+  private waitForDocumentImprovements(uri: vscode.Uri, initialText: string): Promise<boolean> {
     return new Promise((resolve) => {
       let settled = false;
 
@@ -168,7 +155,7 @@ export class FixDiagnosticsCoordinator {
         }
         dispose.dispose();
         resolve(false);
-      }, timeoutMs);
+      }, FixDiagnosticsCoordinator.FIX_DIAGNOSTICS_IMPROVEMENT_TIMEOUT_MS);
     });
   }
 }

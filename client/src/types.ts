@@ -72,5 +72,3 @@ export interface AnalysisDocumentSnapshot {
   isFresh: boolean;
   resultCount: number | undefined;
 };
-
-export type TelemetryData = Record<string, string | number | boolean | undefined>;

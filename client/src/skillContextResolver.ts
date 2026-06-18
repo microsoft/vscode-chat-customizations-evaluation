@@ -37,12 +37,10 @@ export class SkillContextResolver {
     if (workspaceRoot) {
       return workspaceRoot;
     }
-
     const skillsDir = path.dirname(skillDirPath);
     if (path.basename(skillsDir) === 'skills') {
       return path.dirname(skillsDir);
     }
-
     return skillDirPath;
   }
 

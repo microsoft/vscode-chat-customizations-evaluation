@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import type {
     AnalysisDocumentSnapshot,
-    AnalysisSnapshot, AnalysisWorkflowResult, AnalyzeRequest, TelemetryData
+    AnalysisSnapshot, AnalysisWorkflowResult, AnalyzeRequest
 } from './types';
 import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
 import { DiagnosticsManager } from './diagnosticsManager';
@@ -38,25 +38,18 @@ export class AnalysisCoordinator {
 
     async handleAnalyzePromptCommand(options: {
         candidateUri: vscode.Uri | undefined;
-        logTelemetryUsage: (eventName: string, data?: TelemetryData) => void;
-        logTelemetryError: (eventName: string, error: unknown, data?: TelemetryData) => void;
     }): Promise<void> {
-        const resultEventName = 'command/analyzePrompt/result';
         const uri = options.candidateUri ?? vscode.window.activeTextEditor?.document.uri;
         if (!uri) {
-            options.logTelemetryUsage(resultEventName, { outcome: 'noActiveEditor' });
             return;
         }
         if (this.isAnalysisRunning(uri)) {
-            options.logTelemetryUsage(resultEventName, { outcome: 'alreadyRunning' });
             return;
         }
         const result = await this.runAnalyzeWorkflow(uri);
         if (result.outcome === 'failed') {
-            options.logTelemetryError(resultEventName, result.error, { outcome: result.outcome });
             return;
         }
-        options.logTelemetryUsage(resultEventName, result);
     }
 
     async runAnalyzeWorkflow(uri: vscode.Uri): Promise<AnalysisWorkflowResult> {

@@ -11,8 +11,6 @@ interface WazaRecommendationServiceDependencies {
     getExtensionContext: () => WazaDependencies['extensionContext'];
     getOutputChannel: () => WazaDependencies['outputChannel'];
     requestLLM: WazaDependencies['requestLLM'];
-    logTelemetryUsage: WazaDependencies['logTelemetryUsage'];
-    logTelemetryError: WazaDependencies['logTelemetryError'];
 }
 
 export class WazaRecommendationService {
@@ -31,7 +29,6 @@ export class WazaRecommendationService {
     ): Promise<string | undefined> {
         const extensionContext = this.deps.getExtensionContext();
         const outputChannel = this.deps.getOutputChannel();
-        this.deps.logTelemetryUsage('waza/postEvalRecommendation/start');
 
         try {
             outputChannel.appendLine(`[Waza] Generating post-eval recommendation for ${context.skillName}...`);
@@ -72,20 +69,12 @@ export class WazaRecommendationService {
 
             if (llmResponse.error) {
                 outputChannel.appendLine(`[Waza] Post-eval recommendation failed: ${llmResponse.error}`);
-                this.deps.logTelemetryUsage('waza/postEvalRecommendation/result', {
-                    outcome: 'failed',
-                    reason: 'llmError',
-                });
                 return undefined;
             }
 
             const recommendationText = this.normalizeRecommendationText(llmResponse.text);
             if (!recommendationText) {
                 outputChannel.appendLine('[Waza] Post-eval recommendation returned empty output.');
-                this.deps.logTelemetryUsage('waza/postEvalRecommendation/result', {
-                    outcome: 'failed',
-                    reason: 'emptyResponse',
-                });
                 return undefined;
             }
 
@@ -96,20 +85,9 @@ export class WazaRecommendationService {
                 resultsFile,
                 recommendationText,
             );
-
-            this.deps.logTelemetryUsage('waza/postEvalRecommendation/result', {
-                outcome: 'success',
-                recommendationTextLength: recommendationText.length,
-            });
-
             outputChannel.appendLine(`[Waza] Recommendation successfully generated with ${recommendationText.length} characters of actionable guidance.`);
-
             return reportPath;
         } catch (error) {
-            this.deps.logTelemetryError('waza/postEvalRecommendation/result', error, {
-                outcome: 'failed',
-                reason: 'exception',
-            });
             outputChannel.appendLine(`[Waza] Post-eval recommendation crashed: ${error instanceof Error ? error.message : String(error)}`);
             return undefined;
         }
