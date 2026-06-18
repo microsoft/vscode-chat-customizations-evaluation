@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 
 interface DiagnosticEdit {
-  fullDocument: boolean;
   ranges: vscode.Range[];
 }
 
@@ -91,9 +90,9 @@ export class DiagnosticsManager {
     existing: DiagnosticEdit,
     contentChanges: readonly vscode.TextDocumentContentChangeEvent[],
   ): DiagnosticEdit {
-    const hasFullDocumentEdit = existing.fullDocument || contentChanges.some(change => !change.range);
+    const hasFullDocumentEdit = contentChanges.some(change => !change.range);
     if (hasFullDocumentEdit) {
-      return { fullDocument: true, ranges: [] };
+      return { ranges: [] };
     }
 
     const nextRanges = existing.ranges.slice();
@@ -104,7 +103,6 @@ export class DiagnosticsManager {
     }
 
     return {
-      fullDocument: false,
       ranges: nextRanges,
     };
   }
@@ -113,10 +111,6 @@ export class DiagnosticsManager {
     diagnostics: readonly vscode.Diagnostic[],
     edit: DiagnosticEdit,
   ): vscode.Diagnostic[] {
-    if (edit.fullDocument) {
-      return [];
-    }
-
     if (edit.ranges.length === 0) {
       return diagnostics.slice();
     }

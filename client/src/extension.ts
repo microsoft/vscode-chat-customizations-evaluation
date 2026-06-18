@@ -44,7 +44,7 @@ class ExtensionRuntime {
   private analysisCoordinator!: AnalysisCoordinator;
   private fixDiagnosticsCoordinator!: FixDiagnosticsCoordinator;
   private diagnosticsManager!: DiagnosticsManager;
-  private readonly urlResolver = new UrlResolver();
+  private urlResolver!: UrlResolver;
 
   activate(context: vscode.ExtensionContext): void {
     this.initializeCoreServices(context);
@@ -52,32 +52,31 @@ class ExtensionRuntime {
 
     const serverOptions = this.createServerOptions(context);
     const clientOptions = this.createClientOptions();
+
     this.client = new LanguageClient(
       'chatCustomizationsEvaluations',
       'Chat Customizations Evaluations',
       serverOptions,
       clientOptions
     );
+    this.urlResolver = new UrlResolver();
 
     this.registerLanguageClientHandlers();
     this.registerCommands(context);
-    context.subscriptions.push(...registerWazaCommands(context));
     this.registerCodeActionProvider(context);
     this.registerWorkspaceHandlers(context);
     this.registerModelHandlers(context);
     this.startLanguageClient();
+    context.subscriptions.push(...registerWazaCommands(context));
 
-    console.log('Chat Customizations Evaluations extension activated');
+    console.log('Chat Customizations Evaluations extension is activated!');
   }
 
   deactivate(): Thenable<void> | undefined {
-    this.analysisCoordinator?.dispose();
     this.logTelemetryUsage('extension/deactivate');
+    this.analysisCoordinator?.dispose();
     this.telemetryLogger?.dispose();
-    if (!this.client) {
-      return undefined;
-    }
-    return this.client.stop();
+    return this.client?.stop();
   }
 
   private initializeCoreServices(context: vscode.ExtensionContext): void {
@@ -86,11 +85,7 @@ class ExtensionRuntime {
     this.diagnosticsManager = new DiagnosticsManager('chat-customizations-evaluations-client', NON_FIXABLE_DIAGNOSTIC_CODES);
     this.diagnosticsManager.initialize(context);
 
-    this.analysisCoordinator = new AnalysisCoordinator(
-      this.diagnosticsManager,
-      (request) => this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', request),
-    );
-    this.analysisCoordinator.initialize(context);
+    this.analysisCoordinator = new AnalysisCoordinator(context, this.diagnosticsManager, this.client!);
     this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator({
       diagnosticsManager: this.diagnosticsManager,
       resolveSkillContextForUri: (uri) => this.resolveSkillContext({ uri }),
@@ -242,7 +237,6 @@ class ExtensionRuntime {
           return;
         }
         const removedCount = this.diagnosticsManager.handleDocumentChange(event);
-        this.analysisCoordinator?.handleDocumentContentChanged(event.document.uri);
         if (removedCount > 0) {
           this.outputChannel.appendLine(`[Diagnostics] Removed ${removedCount} touched diagnostics for ${event.document.uri.fsPath}`);
         }
