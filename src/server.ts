@@ -1,9 +1,7 @@
 import {
   createConnection,
   TextDocuments,
-  ProposedFeatures,
-  InitializeParams,
-  TextDocumentSyncKind,
+  ProposedFeatures, TextDocumentSyncKind,
   InitializeResult,
   DiagnosticSeverity,
   Diagnostic
@@ -35,7 +33,7 @@ class ChatCustomizationsEvaluationServer {
   }
 
   private registerHandlers(): void {
-    this.connection.onInitialize((params: InitializeParams) => {
+    this.connection.onInitialize(() => {
       const result: InitializeResult = {
         capabilities: {
           textDocumentSync: {

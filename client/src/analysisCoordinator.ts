@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
 import { DiagnosticsManager } from './diagnosticsManager';
+import { LanguageClient } from 'vscode-languageclient/node';
 
 export class AnalysisCoordinator {
     private static readonly QUEUED_ANALYSIS_TIMEOUT_MS = 60000;
@@ -20,11 +21,10 @@ export class AnalysisCoordinator {
     private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
 
     constructor(
+        context: vscode.ExtensionContext,
         private readonly diagnosticsManager: DiagnosticsManager,
-        private readonly sendAnalyzeRequest: (request: AnalyzeRequest) => Thenable<{ duration: number; resultCount: number }>,
-    ) { }
-
-    initialize(context: vscode.ExtensionContext): void {
+        private readonly client: LanguageClient
+    ) {
         context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateHasDiagnosticsContext()));
     }
 
@@ -221,7 +221,7 @@ export class AnalysisCoordinator {
         analyzeRequest: AnalyzeRequest;
     }): Promise<AnalysisWorkflowResult> {
         try {
-            const result = await this.sendAnalyzeRequest(options.analyzeRequest);
+            const result = await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', options.analyzeRequest);
             this.recordAnalysisSnapshot(options.snapshot.document, result.resultCount);
             await vscode.window.showTextDocument(options.snapshot.document, { preview: false, preserveFocus: false });
             await this.completeAnalysis(options.uri, result);

@@ -26,7 +26,6 @@ export interface LLMProxyResponse {
 
 export type LLMProxyFn = (request: LLMProxyRequest) => Promise<LLMProxyResponse>;
 
-// Typed LLM response shapes for extractJSON
 export interface LLMContradictionResponse {
   contradictions?: {
     instruction1: string;
@@ -70,7 +69,6 @@ export interface LLMCoverageResponse {
   missing_error_handling?: { scenario: string; relevant_text: string; suggestion: string }[];
 }
 
-/** Combined LLM response for single-call analysis. */
 export interface LLMCombinedAnalysisResponse {
   contradictions?: LLMContradictionResponse['contradictions'];
   ambiguity_issues?: LLMAmbiguityResponse['issues'];

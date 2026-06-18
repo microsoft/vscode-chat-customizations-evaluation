@@ -13,12 +13,9 @@ export class DiagnosticsManager {
 
   private static collectionName = 'chat-customizations-evaluations-client';
 
-  constructor() {
+  constructor(context: vscode.ExtensionContext) {
     this.diagnosticCollection = vscode.languages.createDiagnosticCollection(DiagnosticsManager.collectionName);
     this.nonFixableDiagnosticCodeSet = new Set(NON_FIXABLE_DIAGNOSTIC_CODES);
-  }
-
-  initialize(context: vscode.ExtensionContext): void {
     context.subscriptions.push(this.diagnosticCollection);
   }
 
@@ -33,9 +30,9 @@ export class DiagnosticsManager {
     this.diagnosticCollection.set(uri, filteredDiagnostics);
   }
 
-  handleDocumentChange(event: vscode.TextDocumentChangeEvent): number {
+  handleDocumentChange(event: vscode.TextDocumentChangeEvent): void {
     if (event.contentChanges.length === 0) {
-      return 0;
+      return;
     }
 
     const uri = event.document.uri;
@@ -46,16 +43,14 @@ export class DiagnosticsManager {
 
     const existingDiagnostics = this.diagnosticCollection.get(uri) ?? [];
     if (existingDiagnostics.length === 0) {
-      return 0;
+      return;
     }
 
     const filteredDiagnostics = this.filterDiagnosticsForEdit(existingDiagnostics, nextEdit);
     if (filteredDiagnostics.length === existingDiagnostics.length) {
-      return 0;
+      return
     }
-
     this.diagnosticCollection.set(uri, filteredDiagnostics);
-    return existingDiagnostics.length - filteredDiagnostics.length;
   }
 
   handleDocumentClosed(uri: vscode.Uri): void {
