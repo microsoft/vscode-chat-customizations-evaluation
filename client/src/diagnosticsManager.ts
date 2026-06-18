@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { NON_FIXABLE_DIAGNOSTIC_CODES } from './strings';
 
 interface DiagnosticEdit {
   ranges: vscode.Range[];
@@ -10,12 +11,11 @@ export class DiagnosticsManager {
   private readonly pendingDiagnosticEditsByUri = new Map<string, DiagnosticEdit>();
   private readonly nonFixableDiagnosticCodeSet: Set<string>;
 
-  constructor(
-    collectionName: string,
-    nonFixableDiagnosticCodes: readonly string[],
-  ) {
-    this.diagnosticCollection = vscode.languages.createDiagnosticCollection(collectionName);
-    this.nonFixableDiagnosticCodeSet = new Set(nonFixableDiagnosticCodes);
+  private static collectionName = 'chat-customizations-evaluations-client';
+
+  constructor() {
+    this.diagnosticCollection = vscode.languages.createDiagnosticCollection(DiagnosticsManager.collectionName);
+    this.nonFixableDiagnosticCodeSet = new Set(NON_FIXABLE_DIAGNOSTIC_CODES);
   }
 
   initialize(context: vscode.ExtensionContext): void {
