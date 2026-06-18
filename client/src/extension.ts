@@ -25,12 +25,12 @@ import type {
 } from './types';
 import { AnalysisCoordinator } from './analysisCoordinator';
 import { FixDiagnosticsCoordinator } from './fixDiagnosticsCoordinator';
+import { DiagnosticsManager } from './diagnosticsManager';
 import { ExtensionTelemetrySender } from './telemetry';
 import { UrlResolver } from './urlResolver';
 import { ModelPicker } from './modelPicker';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
-const NON_FIXABLE_DIAGNOSTIC_CODE_SET = new Set<string>(NON_FIXABLE_DIAGNOSTIC_CODES);
 
 class ExtensionRuntime {
 
@@ -43,9 +43,8 @@ class ExtensionRuntime {
   private telemetryLogger: vscode.TelemetryLogger | undefined;
   private analysisCoordinator!: AnalysisCoordinator;
   private fixDiagnosticsCoordinator!: FixDiagnosticsCoordinator;
-  private extensionDiagnosticCollection!: vscode.DiagnosticCollection;
+  private diagnosticsManager!: DiagnosticsManager;
   private readonly urlResolver = new UrlResolver();
-  private readonly pendingDiagnosticEditsByUri = new Map<string, { fullDocument: boolean; ranges: vscode.Range[] }>();
 
   activate(context: vscode.ExtensionContext): void {
     this.initializeCoreServices(context);
@@ -84,19 +83,16 @@ class ExtensionRuntime {
   private initializeCoreServices(context: vscode.ExtensionContext): void {
     this.extensionContext = context;
     this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
-    this.extensionDiagnosticCollection = vscode.languages.createDiagnosticCollection('chat-customizations-evaluations-client');
-    context.subscriptions.push(this.extensionDiagnosticCollection);
+    this.diagnosticsManager = new DiagnosticsManager('chat-customizations-evaluations-client', NON_FIXABLE_DIAGNOSTIC_CODES);
+    this.diagnosticsManager.initialize(context);
 
     this.analysisCoordinator = new AnalysisCoordinator(
-      (uri) => this.getExtensionDiagnostics(uri),
-      (diagnostic) => this.isNonFixableDiagnostic(diagnostic),
+      this.diagnosticsManager,
       (request) => this.client!.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', request),
     );
     this.analysisCoordinator.initialize(context);
     this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator({
-      getDiagnosticsForUri: (uri) => this.getExtensionDiagnostics(uri),
-      isNonFixableDiagnostic: (diagnostic) => this.isNonFixableDiagnostic(diagnostic),
-      clearDiagnosticsForUri: (uri) => this.extensionDiagnosticCollection.set(uri, []),
+      diagnosticsManager: this.diagnosticsManager,
       resolveSkillContextForUri: (uri) => this.resolveSkillContext({ uri }),
       logTelemetryUsage: (eventName, data) => this.logTelemetryUsage(eventName, data),
     });
@@ -161,7 +157,7 @@ class ExtensionRuntime {
       },
       middleware: {
         handleDiagnostics: (uri, diagnostics, next) => {
-          this.handleLanguageClientDiagnostics(uri, diagnostics);
+          this.diagnosticsManager.handleLanguageClientDiagnostics(uri, diagnostics);
 
           // Prevent duplicate display by routing diagnostics through the client-owned collection.
           next(uri, []);
@@ -169,17 +165,6 @@ class ExtensionRuntime {
       },
       outputChannel: this.outputChannel,
     };
-  }
-
-  private handleLanguageClientDiagnostics(uri: vscode.Uri, diagnostics: readonly vscode.Diagnostic[]): void {
-    const uriKey = uri.toString();
-    const pendingEdit = this.pendingDiagnosticEditsByUri.get(uriKey);
-    const filteredDiagnostics = pendingEdit
-      ? this.filterDiagnosticsForEdit(diagnostics, pendingEdit)
-      : diagnostics;
-
-    this.pendingDiagnosticEditsByUri.delete(uriKey);
-    this.extensionDiagnosticCollection.set(uri, filteredDiagnostics);
   }
 
   private registerLanguageClientHandlers(): void {
@@ -227,9 +212,9 @@ class ExtensionRuntime {
   }
 
   private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection): vscode.CodeAction[] {
-    const allDiagnostics = this.getExtensionDiagnostics(document.uri);
+    const allDiagnostics = this.diagnosticsManager.getDiagnosticsForUri(document.uri);
     const fixableDiagnostics = allDiagnostics.filter(
-      d => !this.isNonFixableDiagnostic(d) && this.rangesOverlap(d.range, range),
+      d => !this.diagnosticsManager.isNonFixableDiagnostic(d) && this.diagnosticsManager.rangesOverlap(d.range, range),
     );
     if (fixableDiagnostics.length === 0) {
       return [];
@@ -253,12 +238,17 @@ class ExtensionRuntime {
         this.analysisCoordinator?.handleDiagnosticsChanged(e.uris);
       }),
       vscode.workspace.onDidChangeTextDocument((event) => {
-        this.handleDocumentChangeForDiagnostics(event);
+        if (event.contentChanges.length === 0) {
+          return;
+        }
+        const removedCount = this.diagnosticsManager.handleDocumentChange(event);
+        this.analysisCoordinator?.handleDocumentContentChanged(event.document.uri);
+        if (removedCount > 0) {
+          this.outputChannel.appendLine(`[Diagnostics] Removed ${removedCount} touched diagnostics for ${event.document.uri.fsPath}`);
+        }
       }),
       vscode.workspace.onDidCloseTextDocument((document) => {
-        const uriKey = document.uri.toString();
-        this.pendingDiagnosticEditsByUri.delete(uriKey);
-        this.extensionDiagnosticCollection.delete(document.uri);
+        this.diagnosticsManager.handleDocumentClosed(document.uri);
         this.analysisCoordinator?.handleDocumentClosed(document.uri);
       }),
     );
@@ -360,113 +350,6 @@ class ExtensionRuntime {
       query: `/analyze-prompt ${targetUri?.toString() ?? ''}`,
       isPartialQuery: false,
     });
-  }
-
-  private getExtensionDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
-    const fromCollection = this.extensionDiagnosticCollection.get(uri) ?? [];
-    if (fromCollection.length > 0) {
-      return fromCollection.filter(
-        d => d.source?.startsWith('chat-customizations-evaluations')
-      );
-    }
-
-    return vscode.languages.getDiagnostics(uri).filter(
-      d => d.source?.startsWith('chat-customizations-evaluations')
-    );
-  }
-
-  private handleDocumentChangeForDiagnostics(event: vscode.TextDocumentChangeEvent): void {
-    if (event.contentChanges.length === 0) {
-      return;
-    }
-
-    const uri = event.document.uri;
-    this.analysisCoordinator?.handleDocumentContentChanged(uri);
-    const uriKey = uri.toString();
-    const currentEdit = this.pendingDiagnosticEditsByUri.get(uriKey) ?? { fullDocument: false, ranges: [] };
-    const nextEdit = this.mergeDiagnosticEdit(currentEdit, event.contentChanges);
-    this.pendingDiagnosticEditsByUri.set(uriKey, nextEdit);
-
-    const existingDiagnostics = this.extensionDiagnosticCollection.get(uri) ?? [];
-    if (existingDiagnostics.length === 0) {
-      return;
-    }
-
-    const filteredDiagnostics = this.filterDiagnosticsForEdit(existingDiagnostics, nextEdit);
-    if (filteredDiagnostics.length === existingDiagnostics.length) {
-      return;
-    }
-
-    this.extensionDiagnosticCollection.set(uri, filteredDiagnostics);
-    this.outputChannel.appendLine(`[Diagnostics] Removed ${existingDiagnostics.length - filteredDiagnostics.length} touched diagnostics for ${uri.fsPath}`);
-  }
-
-  private mergeDiagnosticEdit(
-    existing: { fullDocument: boolean; ranges: vscode.Range[] },
-    contentChanges: readonly vscode.TextDocumentContentChangeEvent[],
-  ): { fullDocument: boolean; ranges: vscode.Range[] } {
-    const hasFullDocumentEdit = existing.fullDocument || contentChanges.some(change => !change.range);
-    if (hasFullDocumentEdit) {
-      return { fullDocument: true, ranges: [] };
-    }
-
-    const nextRanges = existing.ranges.slice();
-    for (const change of contentChanges) {
-      if (change.range) {
-        nextRanges.push(change.range);
-      }
-    }
-
-    return {
-      fullDocument: false,
-      ranges: nextRanges,
-    };
-  }
-
-  private filterDiagnosticsForEdit(
-    diagnostics: readonly vscode.Diagnostic[],
-    edit: { fullDocument: boolean; ranges: vscode.Range[] },
-  ): vscode.Diagnostic[] {
-    if (edit.fullDocument) {
-      return [];
-    }
-
-    if (edit.ranges.length === 0) {
-      return diagnostics.slice();
-    }
-
-    return diagnostics.filter((diagnostic) => {
-      return !edit.ranges.some((range) => this.rangesOverlap(diagnostic.range, range));
-    });
-  }
-
-  private comparePosition(left: vscode.Position, right: vscode.Position): number {
-    if (left.line !== right.line) {
-      return left.line - right.line;
-    }
-
-    return left.character - right.character;
-  }
-
-  private rangesOverlap(left: vscode.Range, right: vscode.Range): boolean {
-    return this.comparePosition(left.start, right.end) <= 0
-      && this.comparePosition(right.start, left.end) <= 0;
-  }
-
-  private diagnosticCodeToString(code: vscode.Diagnostic['code']): string {
-    if (code === undefined) {
-      return 'n/a';
-    }
-
-    if (typeof code === 'string' || typeof code === 'number') {
-      return String(code);
-    }
-
-    return String(code.value);
-  }
-
-  private isNonFixableDiagnostic(diagnostic: vscode.Diagnostic): boolean {
-    return NON_FIXABLE_DIAGNOSTIC_CODE_SET.has(this.diagnosticCodeToString(diagnostic.code));
   }
 
   private resolveSkillContext(obj: unknown): SkillContext | undefined {

@@ -6,6 +6,7 @@ import type {
     AnalysisSnapshot, AnalysisWorkflowResult, AnalyzeRequest, TelemetryData
 } from './types';
 import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
+import { DiagnosticsManager } from './diagnosticsManager';
 
 export class AnalysisCoordinator {
 
@@ -15,8 +16,7 @@ export class AnalysisCoordinator {
     private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
 
     constructor(
-        private readonly getDiagnosticsForUri: (uri: vscode.Uri) => vscode.Diagnostic[],
-        private readonly isNonFixableDiagnosticForEntry: (diagnostic: vscode.Diagnostic) => boolean,
+        private readonly diagnosticsManager: DiagnosticsManager,
         private readonly sendAnalyzeRequest: (request: AnalyzeRequest) => Thenable<{ duration: number; resultCount: number }>,
     ) { }
 
@@ -83,7 +83,7 @@ export class AnalysisCoordinator {
 
     handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
         for (const uri of uris) {
-            const diagnostics = this.getDiagnosticsForUri(uri);
+            const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
             const uriKey = uri.toString();
             if (diagnostics.length > 0) {
                 this.urisWithDiagnostics.add(uriKey);
@@ -108,7 +108,7 @@ export class AnalysisCoordinator {
     async focusExistingDiagnostics(uri: vscode.Uri): Promise<boolean> {
         const document = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-        const firstDiagnostic = this.getDiagnosticsForUri(uri)
+        const firstDiagnostic = this.diagnosticsManager.getDiagnosticsForUri(uri)
             .slice()
             .sort((a, b) => {
                 if (a.range.start.line !== b.range.start.line) {
@@ -136,7 +136,7 @@ export class AnalysisCoordinator {
     async getCurrentAnalysisSnapshot(uri: vscode.Uri): Promise<AnalysisDocumentSnapshot> {
         const document = await vscode.workspace.openTextDocument(uri);
         const cachedSnapshot = this.analysisSnapshotsByUri.get(uri.toString());
-        const diagnostics = this.getDiagnosticsForUri(uri);
+        const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
         const isFresh = cachedSnapshot?.fingerprint === this.computeAnalysisFingerprint(document);
         const resultCount = cachedSnapshot?.resultCount;
         return {
@@ -161,7 +161,7 @@ export class AnalysisCoordinator {
             return;
         }
         const message = `Analysis of ${filename} complete${result.duration}: ${this.formatIssueSummary(result.resultCount)}.`;
-        const diagnostics = this.getDiagnosticsForUri(uri)
+        const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri)
             .slice()
             .sort((a, b) => {
                 if (a.range.start.line !== b.range.start.line) {
@@ -169,7 +169,7 @@ export class AnalysisCoordinator {
                 }
                 return a.range.start.character - b.range.start.character;
             });
-        const hasNonFixableDiagnostics = diagnostics.some(diagnostic => this.isNonFixableDiagnosticForEntry(diagnostic));
+        const hasNonFixableDiagnostics = diagnostics.some(diagnostic => this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
 
         (async () => {
             const actions = hasNonFixableDiagnostics
@@ -231,7 +231,7 @@ export class AnalysisCoordinator {
     }
 
     private accumulatePreviousDiagnostics(uri: vscode.Uri): void {
-        const currentDiagnostics = this.getDiagnosticsForUri(uri);
+        const currentDiagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
         if (currentDiagnostics.length === 0) {
             return;
         }

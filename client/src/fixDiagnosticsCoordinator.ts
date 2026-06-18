@@ -1,12 +1,11 @@
 import * as vscode from 'vscode';
 import { ACTION_ANALYZE_AGAIN } from './strings';
 import type { SkillContext, TelemetryData } from './types';
+import { DiagnosticsManager } from './diagnosticsManager';
 import { handlePostFixDiagnosticsFlow } from './waza/waza';
 
 interface FixDiagnosticsCoordinatorOptions {
-  getDiagnosticsForUri: (uri: vscode.Uri) => vscode.Diagnostic[];
-  isNonFixableDiagnostic: (diagnostic: vscode.Diagnostic) => boolean;
-  clearDiagnosticsForUri: (uri: vscode.Uri) => void;
+  diagnosticsManager: DiagnosticsManager;
   resolveSkillContextForUri: (uri: vscode.Uri) => SkillContext | undefined;
   logTelemetryUsage: (eventName: string, data?: TelemetryData) => void;
 }
@@ -32,7 +31,7 @@ export class FixDiagnosticsCoordinator {
 
     let fixableDiagnostics: vscode.Diagnostic[];
     if (scopedDiagnostics && scopedDiagnostics.length > 0) {
-      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.options.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
     } else {
       const diagnostics = this.getSortedDiagnostics(targetUri);
 
@@ -42,14 +41,14 @@ export class FixDiagnosticsCoordinator {
         return;
       }
 
-      fixableDiagnostics = diagnostics.filter(diagnostic => !this.options.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = diagnostics.filter(diagnostic => !this.options.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
     }
     if (await this.handleNonFixableDiagnosticsOnly(fixableDiagnostics.length)) {
       return;
     }
 
     await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
-    this.options.clearDiagnosticsForUri(targetUri);
+    this.options.diagnosticsManager.clearDiagnosticsForUri(targetUri);
 
     const hasImprovements = await this.waitForDocumentImprovements(
       targetUri,
@@ -75,7 +74,7 @@ export class FixDiagnosticsCoordinator {
   }
 
   private getSortedDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
-    return this.options.getDiagnosticsForUri(uri)
+    return this.options.diagnosticsManager.getDiagnosticsForUri(uri)
       .slice()
       .sort((a, b) => {
         if (a.range.start.line !== b.range.start.line) {
