@@ -11,12 +11,6 @@ export interface LLMProxyResponse {
   error?: string;
 }
 
-export interface AnalysisState {
-  startedAt: number;
-  stage: string;
-  llmRequestsInFlight: number;
-}
-
 export interface CustomDiagnosticConfig {
   name: string;
   description: string;
@@ -34,32 +28,6 @@ export interface SkillContext {
   skillName: string;
   workspaceRoot: string;
 }
-
-export interface EvalScaffoldSummary {
-  evalPath: string;
-  createdFiles: string[];
-}
-
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-export type AnalysisWorkflowResult =
-  | {
-    outcome: 'alreadyCurrentWithDiagnostics';
-    resultCount: number;
-  }
-  | {
-    outcome: 'success';
-    resultCount: number;
-    durationMs: number;
-  }
-  | {
-    outcome: 'failed';
-    error: unknown;
-  };
 
 export interface AnalysisDocumentSnapshot {
   document: vscode.TextDocument;

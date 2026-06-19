@@ -40,7 +40,6 @@ class ExtensionRuntime {
   private fixDiagnosticsCoordinator!: FixDiagnosticsCoordinator;
   private diagnosticsManager!: DiagnosticsManager;
 
-
   private readonly urlResolver = new UrlResolver();
   private readonly skillContextResolver = new SkillContextResolver(this.urlResolver);
 
