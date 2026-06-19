@@ -46,14 +46,14 @@ export class FixDiagnosticsCoordinator {
   private getFixableDiagnostics(targetUri: vscode.Uri, scopedDiagnostics?: vscode.Diagnostic[]): vscode.Diagnostic[] {
     let fixableDiagnostics: vscode.Diagnostic[];
     if (scopedDiagnostics && scopedDiagnostics.length > 0) {
-      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = scopedDiagnostics.filter(diagnostic => !this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
     } else {
       const diagnostics = this.getSortedDiagnostics(targetUri);
       if (diagnostics.length === 0) {
         vscode.window.showInformationMessage('No diagnostics found for the active file. Run Analyze first.');
         return [];
       }
-      fixableDiagnostics = diagnostics.filter(diagnostic => !this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+      fixableDiagnostics = diagnostics.filter(diagnostic => !this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
     }
     return fixableDiagnostics;
   }

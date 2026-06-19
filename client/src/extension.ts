@@ -45,9 +45,8 @@ class ExtensionRuntime {
   private readonly skillContextResolver = new SkillContextResolver(this.urlResolver);
 
   activate(context: vscode.ExtensionContext): void {
-    this.initializeCoreServices(context);
-    this.initializeWazaRuntime();
 
+    this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
     const serverOptions = this.createServerOptions(context);
     const clientOptions = this.createClientOptions();
     this.client = new LanguageClient(
@@ -57,6 +56,8 @@ class ExtensionRuntime {
       clientOptions
     );
 
+    this.initializeCoreServices(context);
+    this.initializeWazaRuntime();
     this.registerLanguageClientHandlers();
     this.registerCommands(context);
     this.registerCodeActionProvider(context);
@@ -78,9 +79,8 @@ class ExtensionRuntime {
 
   private initializeCoreServices(context: vscode.ExtensionContext): void {
     this.extensionContext = context;
-    this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
     this.diagnosticsManager = new DiagnosticsManager(context);
-    this.analysisCoordinator = new AnalysisCoordinator(context, this.diagnosticsManager, this.client);
+    this.analysisCoordinator = new AnalysisCoordinator(context, this.diagnosticsManager, this.client, this.outputChannel);
     this.fixDiagnosticsCoordinator = new FixDiagnosticsCoordinator(this.diagnosticsManager, this.skillContextResolver)
     this.modelPicker = new ModelPicker(this.outputChannel);
   }
@@ -185,7 +185,7 @@ class ExtensionRuntime {
   private provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection): vscode.CodeAction[] {
     const allDiagnostics = this.diagnosticsManager.getDiagnosticsForUri(document.uri);
     const fixableDiagnostics = allDiagnostics.filter(
-      d => !this.diagnosticsManager.isNonFixableDiagnostic(d) && this.diagnosticsManager.rangesOverlap(d.range, range),
+      d => !this.diagnosticsManager.hasErrorDiagnostics(d) && this.diagnosticsManager.rangesOverlap(d.range, range),
     );
     if (fixableDiagnostics.length === 0) {
       return [];
@@ -244,9 +244,7 @@ class ExtensionRuntime {
   private registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
-      vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand({
-        candidateUri: this.urlResolver.getCustomizationUri(obj)
-      })),
+      vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand(this.urlResolver.getCustomizationUri(obj))),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async (diagnostics?: vscode.Diagnostic[]) => this.fixDiagnosticsCoordinator.handleFixDiagnosticsCommand(diagnostics)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),
     );

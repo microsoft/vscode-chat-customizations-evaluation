@@ -17,11 +17,6 @@ export interface AnalysisState {
   llmRequestsInFlight: number;
 }
 
-export interface AnalysisSnapshot {
-  fingerprint: string;
-  resultCount: number;
-}
-
 export interface CustomDiagnosticConfig {
   name: string;
   description: string;
@@ -70,5 +65,4 @@ export interface AnalysisDocumentSnapshot {
   document: vscode.TextDocument;
   diagnostics: vscode.Diagnostic[];
   isFresh: boolean;
-  resultCount: number | undefined;
 };

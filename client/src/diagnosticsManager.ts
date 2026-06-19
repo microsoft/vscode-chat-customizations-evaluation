@@ -72,7 +72,7 @@ export class DiagnosticsManager {
     return vscode.languages.getDiagnostics(uri).filter(diagnostic => diagnostic.source?.startsWith('chat-customizations-evaluations'));
   }
 
-  isNonFixableDiagnostic(diagnostic: vscode.Diagnostic): boolean {
+  hasErrorDiagnostics(diagnostic: vscode.Diagnostic): boolean {
     return this.nonFixableDiagnosticCodeSet.has(this.diagnosticCodeToString(diagnostic.code));
   }
 

@@ -2,28 +2,28 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import type {
-    AnalysisDocumentSnapshot,
-    AnalysisSnapshot, AnalysisWorkflowResult, AnalyzeRequest
+    AnalysisDocumentSnapshot, AnalyzeRequest
 } from './types';
 import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
 import { DiagnosticsManager } from './diagnosticsManager';
 import { LanguageClient } from 'vscode-languageclient/node';
 
 export class AnalysisCoordinator {
-    private static readonly QUEUED_ANALYSIS_TIMEOUT_MS = 60000;
 
+    private static readonly QUEUED_ANALYSIS_TIMEOUT_MS = 60000;
     private static readonly MAX_PREVIOUS_DIAGNOSTICS = 10;
 
     private readonly urisWithDiagnostics = new Set<string>();
     private readonly queuedAnalysisUris = new Set<string>();
     private readonly queuedAnalysisTimeoutsByUri = new Map<string, ReturnType<typeof setTimeout>>();
-    private readonly analysisSnapshotsByUri = new Map<string, AnalysisSnapshot>();
-    private readonly previousDiagnosticMessagesByUri = new Map<string, string[]>();
+    private readonly analysisSnapshotsByUri = new Map<string, string>();
+    private readonly previousDiagnosticsByUri = new Map<string, string[]>();
 
     constructor(
         context: vscode.ExtensionContext,
         private readonly diagnosticsManager: DiagnosticsManager,
-        private readonly client: LanguageClient
+        private readonly client: LanguageClient,
+        private readonly outputChannel: vscode.OutputChannel
     ) {
         context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateHasDiagnosticsContext()));
     }
@@ -36,49 +36,32 @@ export class AnalysisCoordinator {
         this.queuedAnalysisUris.clear();
     }
 
-    async handleAnalyzePromptCommand(options: {
-        candidateUri: vscode.Uri | undefined;
-    }): Promise<void> {
-        const uri = options.candidateUri ?? vscode.window.activeTextEditor?.document.uri;
+    async handleAnalyzePromptCommand(candidateUri: vscode.Uri | undefined): Promise<void> {
+        const uri = candidateUri ?? vscode.window.activeTextEditor?.document.uri;
         if (!uri) {
             return;
         }
         if (this.isAnalysisRunning(uri)) {
             return;
         }
-        const result = await this.runAnalyzeWorkflow(uri);
-        if (result.outcome === 'failed') {
-            return;
-        }
+        await this.runAnalyzeWorkflow(uri);
     }
 
-    async runAnalyzeWorkflow(uri: vscode.Uri): Promise<AnalysisWorkflowResult> {
+    async runAnalyzeWorkflow(uri: vscode.Uri): Promise<void> {
         const uriKey = uri.toString();
         if (!this.queuedAnalysisUris.has(uriKey)) {
             this.queueAnalysis(uri);
         }
         this.clearQueuedAnalysisTimeout(uriKey);
 
-        const previousDiagnosticMessages = this.previousDiagnosticMessagesByUri.get(uri.toString());
-        const analyzeRequest = {
-            uri: uri.toString(),
-            previousDiagnosticMessages,
-        };
-        const currentSnapshot = await this.getCurrentAnalysisSnapshot(uri);
-
-        if (currentSnapshot.isFresh && currentSnapshot.diagnostics.length > 0) {
+        const snapshot = await this.getCurrentAnalysisSnapshot(uri);
+        if (snapshot.isFresh && snapshot.diagnostics.length > 0) {
             await this.focusExistingDiagnostics(uri);
             vscode.window.showInformationMessage('Analysis is already up to date.');
-            return {
-                outcome: 'alreadyCurrentWithDiagnostics',
-                resultCount: currentSnapshot.diagnostics.length,
-            };
+            return;
         }
-        return this.executeAnalyzeRequest({
-            uri,
-            snapshot: currentSnapshot,
-            analyzeRequest,
-        });
+        const previousDiagnostics = this.previousDiagnosticsByUri.get(uri.toString());
+        this.executeAnalyzeRequest(uri, snapshot, previousDiagnostics);
     }
 
     isAnalysisPending(uri: vscode.Uri): boolean {
@@ -115,51 +98,44 @@ export class AnalysisCoordinator {
 
     handleDocumentClosed(uri: vscode.Uri): void {
         const uriKey = uri.toString();
-        this.previousDiagnosticMessagesByUri.delete(uriKey);
+        this.previousDiagnosticsByUri.delete(uriKey);
         this.clearQueuedAnalysis(uriKey);
         this.updateIsAnalyzingContext();
     }
 
-    async focusExistingDiagnostics(uri: vscode.Uri): Promise<boolean> {
+    async focusExistingDiagnostics(uri: vscode.Uri): Promise<void> {
         const document = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-        const firstDiagnostic = this.diagnosticsManager.getDiagnosticsForUri(uri)
+        const firstDiagnostic = this.getSortedDiagnostics(uri)[0];
+        if (!firstDiagnostic) {
+            return;
+        }
+        editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
+        editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+        await vscode.commands.executeCommand('workbench.actions.view.problems');
+    }
+
+    private getSortedDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
+        return this.diagnosticsManager.getDiagnosticsForUri(uri)
             .slice()
             .sort((a, b) => {
                 if (a.range.start.line !== b.range.start.line) {
                     return a.range.start.line - b.range.start.line;
                 }
                 return a.range.start.character - b.range.start.character;
-            })[0];
-
-        if (!firstDiagnostic) {
-            return false;
-        }
-        editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
-        editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-        await vscode.commands.executeCommand('workbench.actions.view.problems');
-        return true;
+            })
     }
 
-    recordAnalysisSnapshot(document: vscode.TextDocument, resultCount: number): void {
-        this.analysisSnapshotsByUri.set(document.uri.toString(), {
-            fingerprint: this.computeAnalysisFingerprint(document),
-            resultCount,
-        });
+    recordAnalysisSnapshot(document: vscode.TextDocument): void {
+        this.analysisSnapshotsByUri.set(document.uri.toString(), this.computeAnalysisFingerprint(document));
     }
 
     async getCurrentAnalysisSnapshot(uri: vscode.Uri): Promise<AnalysisDocumentSnapshot> {
         const document = await vscode.workspace.openTextDocument(uri);
-        const cachedSnapshot = this.analysisSnapshotsByUri.get(uri.toString());
+        const fingerprint = this.analysisSnapshotsByUri.get(uri.toString());
         const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
-        const isFresh = cachedSnapshot?.fingerprint === this.computeAnalysisFingerprint(document);
-        const resultCount = cachedSnapshot?.resultCount;
-        return {
-            document,
-            diagnostics,
-            isFresh,
-            resultCount,
-        };
+        const isFresh = fingerprint === this.computeAnalysisFingerprint(document);
+        return { document, diagnostics, isFresh };
     }
 
     async completeAnalysis(uri: vscode.Uri, result: { duration: number; resultCount: number }): Promise<void> {
@@ -171,26 +147,16 @@ export class AnalysisCoordinator {
         await vscode.commands.executeCommand('workbench.actions.view.problems');
 
         const filename = path.basename(uri.fsPath);
-        const durationText = ` in ${this.formatDurationMs(result.duration)}`;
         if (result.resultCount === 0) {
-            vscode.window.showInformationMessage(`Analysis of ${filename} complete${durationText}: no issues found.`);
+            vscode.window.showInformationMessage(`Analysis of ${filename} complete: no issues found.`);
             return;
         }
-        const message = `Analysis of ${filename} complete${result.duration}: ${this.formatIssueSummary(result.resultCount)}.`;
-        const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri)
-            .slice()
-            .sort((a, b) => {
-                if (a.range.start.line !== b.range.start.line) {
-                    return a.range.start.line - b.range.start.line;
-                }
-                return a.range.start.character - b.range.start.character;
-            });
-        const hasNonFixableDiagnostics = diagnostics.some(diagnostic => this.diagnosticsManager.isNonFixableDiagnostic(diagnostic));
+        const diagnostics = this.getSortedDiagnostics(uri);
 
         (async () => {
-            const actions = hasNonFixableDiagnostics
-                ? [ACTION_ANALYZE_AGAIN]
-                : [ACTION_FIX_DIAGNOSTICS];
+            const message = `Analysis of ${filename} complete in ${result.duration} seconds: ${this.formatIssueSummary(result.resultCount)}.`;
+            const hasErrorDiagnostics = diagnostics.some(diagnostic => this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
+            const actions = hasErrorDiagnostics ? [ACTION_ANALYZE_AGAIN] : [ACTION_FIX_DIAGNOSTICS];
             const action = await vscode.window.showInformationMessage(message, ...actions);
             if (action === ACTION_ANALYZE_AGAIN) {
                 await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand');
@@ -202,11 +168,9 @@ export class AnalysisCoordinator {
         const document = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
         const firstDiagnostic = diagnostics[0];
-
         if (!firstDiagnostic) {
             return;
         }
-
         editor.selection = new vscode.Selection(firstDiagnostic.range.start, firstDiagnostic.range.start);
         editor.revealRange(firstDiagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     }
@@ -215,34 +179,22 @@ export class AnalysisCoordinator {
         return count === 1 ? '1 issue found' : `${count} issues found`;
     }
 
-    private async executeAnalyzeRequest(options: {
-        uri: vscode.Uri;
-        snapshot: AnalysisDocumentSnapshot;
-        analyzeRequest: AnalyzeRequest;
-    }): Promise<AnalysisWorkflowResult> {
+    private async executeAnalyzeRequest(
+        uri: vscode.Uri,
+        snapshot: AnalysisDocumentSnapshot,
+        previousDiagnostics: string[] | undefined
+    ): Promise<void> {
         try {
-            const result = await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', options.analyzeRequest);
-            this.recordAnalysisSnapshot(options.snapshot.document, result.resultCount);
-            await vscode.window.showTextDocument(options.snapshot.document, { preview: false, preserveFocus: false });
-            await this.completeAnalysis(options.uri, result);
-            this.accumulatePreviousDiagnostics(options.uri);
-            return {
-                outcome: 'success',
-                resultCount: result.resultCount,
-                durationMs: result.duration,
-            };
+            const analyzeRequest: AnalyzeRequest = { uri: uri.toString(), previousDiagnosticMessages: previousDiagnostics };
+            const result = await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+            this.recordAnalysisSnapshot(snapshot.document);
+            await vscode.window.showTextDocument(snapshot.document, { preview: false, preserveFocus: false });
+            await this.completeAnalysis(uri, result);
+            this.accumulatePreviousDiagnostics(uri);
         } catch (error) {
-            void vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
-            return {
-                outcome: 'failed',
-                error,
-            };
+            this.outputChannel.appendLine(`[Analysis] Error: ${error}`);
+            vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
         }
-    }
-
-    private formatDurationMs(durationMs: number): string {
-        const seconds = Math.max(1, Math.round(durationMs / 1000));
-        return `${seconds}s`;
     }
 
     private accumulatePreviousDiagnostics(uri: vscode.Uri): void {
@@ -250,11 +202,9 @@ export class AnalysisCoordinator {
         if (currentDiagnostics.length === 0) {
             return;
         }
-
         const uriKey = uri.toString();
-        const existing = this.previousDiagnosticMessagesByUri.get(uriKey) ?? [];
+        const existing = this.previousDiagnosticsByUri.get(uriKey) ?? [];
         const existingSet = new Set(existing);
-
         for (const diagnostic of currentDiagnostics) {
             const message = diagnostic.message.trim();
             if (message && !existingSet.has(message)) {
@@ -265,7 +215,7 @@ export class AnalysisCoordinator {
         if (existing.length > AnalysisCoordinator.MAX_PREVIOUS_DIAGNOSTICS) {
             existing.splice(0, existing.length - AnalysisCoordinator.MAX_PREVIOUS_DIAGNOSTICS);
         }
-        this.previousDiagnosticMessagesByUri.set(uriKey, existing);
+        this.previousDiagnosticsByUri.set(uriKey, existing);
     }
 
     private updateIsAnalyzingContext(): void {
@@ -287,7 +237,6 @@ export class AnalysisCoordinator {
         if (!timeout) {
             return;
         }
-
         clearTimeout(timeout);
         this.queuedAnalysisTimeoutsByUri.delete(uriKey);
     }
