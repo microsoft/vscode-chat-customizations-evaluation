@@ -1,5 +1,5 @@
 import type * as vscode from 'vscode';
-import type { LLMProxyRequest, LLMProxyResponse } from '../types';
+import type { LLMProxyRequest, LLMProxyResponse } from '../analysis/types';
 
 export type TelemetryData = Record<string, string | number | boolean | undefined>;
 

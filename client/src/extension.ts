@@ -14,17 +14,17 @@ import {
 } from './waza/waza';
 import {
   ACTION_FIX_DIAGNOSTICS
-} from './strings';
+} from './analysis/strings';
 import type {
   LLMProxyRequest,
   LLMProxyResponse
-} from './types';
-import { AnalysisCoordinator } from './analysisCoordinator';
-import { FixDiagnosticsCoordinator } from './fixDiagnosticsCoordinator';
-import { DiagnosticsManager } from './diagnosticsManager';
-import { UrlResolver } from './urlResolver';
-import { ModelPicker } from './modelPicker';
-import { SkillContextResolver } from './skillContextResolver';
+} from './analysis/types';
+import { AnalysisCoordinator } from './analysis/analysisCoordinator';
+import { FixDiagnosticsCoordinator } from './analysis/fixDiagnosticsCoordinator';
+import { DiagnosticsManager } from './analysis/diagnosticsManager';
+import { UrlResolver } from './analysis/urlResolver';
+import { ModelPicker } from './analysis/modelPicker';
+import { SkillContextResolver } from './analysis/skillContextResolver';
 
 const LLMRequestType = new RequestType<LLMProxyRequest, LLMProxyResponse, void>('chatCustomizationsEvaluations/llmRequest');
 
