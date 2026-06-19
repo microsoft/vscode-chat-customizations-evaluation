@@ -12,6 +12,7 @@ export class AnalysisCoordinator {
 
     private static readonly QUEUED_ANALYSIS_TIMEOUT_MS = 60000;
     private static readonly MAX_PREVIOUS_DIAGNOSTICS = 10;
+    private static readonly ANALYSIS_PROGRESS_UPDATE_INTERVAL_MS = 5000;
 
     private readonly urisWithDiagnostics = new Set<string>();
     private readonly queuedAnalysisUris = new Set<string>();
@@ -34,6 +35,7 @@ export class AnalysisCoordinator {
         }
         this.queuedAnalysisTimeoutsByUri.clear();
         this.queuedAnalysisUris.clear();
+        this.updateIsAnalyzingContext();
     }
 
     async handleAnalyzePromptCommand(candidateUri: vscode.Uri | undefined): Promise<void> {
@@ -56,6 +58,8 @@ export class AnalysisCoordinator {
 
         const snapshot = await this.getCurrentAnalysisSnapshot(uri);
         if (snapshot.isFresh && snapshot.diagnostics.length > 0) {
+            this.clearQueuedAnalysis(uriKey);
+            this.updateIsAnalyzingContext();
             await this.focusExistingDiagnostics(uri);
             vscode.window.showInformationMessage('Analysis is already up to date.');
             return;
@@ -159,7 +163,7 @@ export class AnalysisCoordinator {
             const actions = hasErrorDiagnostics ? [ACTION_ANALYZE_AGAIN] : [ACTION_FIX_DIAGNOSTICS];
             const action = await vscode.window.showInformationMessage(message, ...actions);
             if (action === ACTION_ANALYZE_AGAIN) {
-                await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand');
+                await vscode.commands.executeCommand('chatCustomizationsEvaluations.analyzePrompt');
             } else if (action === ACTION_FIX_DIAGNOSTICS) {
                 await vscode.commands.executeCommand('chatCustomizationsEvaluations.fixDiagnostics');
             }
@@ -184,14 +188,35 @@ export class AnalysisCoordinator {
         snapshot: AnalysisDocumentSnapshot,
         previousDiagnostics: string[] | undefined
     ): Promise<void> {
+        const filename = path.basename(uri.fsPath || uri.path || 'prompt');
         try {
-            const analyzeRequest: AnalyzeRequest = { uri: uri.toString(), previousDiagnosticMessages: previousDiagnostics };
-            const result = await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Analyzing ${filename}`,
+                    cancellable: false,
+                },
+                async (progress) => {
+                    progress.report({ message: 'Analysis in progress...' });
+                    const interval = setInterval(() => {
+                        progress.report({ message: 'Analysis in progress...' });
+                    }, AnalysisCoordinator.ANALYSIS_PROGRESS_UPDATE_INTERVAL_MS);
+
+                    try {
+                        const analyzeRequest: AnalyzeRequest = { uri: uri.toString(), previousDiagnosticMessages: previousDiagnostics };
+                        return await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
+                    } finally {
+                        clearInterval(interval);
+                    }
+                }
+            );
             this.recordAnalysisSnapshot(snapshot.document);
             await vscode.window.showTextDocument(snapshot.document, { preview: false, preserveFocus: false });
             await this.completeAnalysis(uri, result);
             this.accumulatePreviousDiagnostics(uri);
         } catch (error) {
+            this.clearQueuedAnalysis(uri.toString());
+            this.updateIsAnalyzingContext();
             this.outputChannel.appendLine(`[Analysis] Error: ${error}`);
             vscode.window.showErrorMessage('Prompt analysis failed. See output for details.');
         }
@@ -219,7 +244,8 @@ export class AnalysisCoordinator {
     }
 
     private updateIsAnalyzingContext(): void {
-        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', this.queuedAnalysisUris.size > 0);
+        const analyzingCount = this.queuedAnalysisUris.size;
+        void vscode.commands.executeCommand('setContext', 'chatCustomizationsEvaluations.isAnalyzing', analyzingCount > 0);
     }
 
     private isAnalysisRunning(uri: vscode.Uri): boolean {

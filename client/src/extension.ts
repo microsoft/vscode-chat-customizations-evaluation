@@ -243,7 +243,9 @@ class ExtensionRuntime {
 
   private registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
+      // The next line is kept for future use
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptUsingSlashCommand', async (obj) => this.handleAnalyzePromptUsingSlashCommand(obj)),
+      // 
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePrompt', async (obj) => this.analysisCoordinator.handleAnalyzePromptCommand(this.urlResolver.getCustomizationUri(obj))),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.fixDiagnostics', async (diagnostics?: vscode.Diagnostic[]) => this.fixDiagnosticsCoordinator.handleFixDiagnosticsCommand(diagnostics)),
       vscode.commands.registerCommand('chatCustomizationsEvaluations.analyzePromptFromCustomization', async (obj) => this.handleAnalyzePromptFromCustomizationCommand(obj)),

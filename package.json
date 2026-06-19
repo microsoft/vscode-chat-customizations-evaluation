@@ -190,7 +190,7 @@
       ],
       "editor/content": [
         {
-          "command": "chatCustomizationsEvaluations.analyzePromptUsingSlashCommand",
+          "command": "chatCustomizationsEvaluations.analyzePrompt",
           "group": "inline",
           "when": "!chatCustomizationsEvaluations.hasDiagnostics && !chatCustomizationsEvaluations.isAnalyzing && (editorLangId == prompt || editorLangId == chatagent || editorLangId == skill || editorLangId == instructions || resourceFilename == AGENTS.md)"
         },
