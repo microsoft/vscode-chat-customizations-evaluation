@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ACTION_ANALYZE_AGAIN } from './strings';
-import { handlePostFixDiagnosticsFlow } from './waza/waza';
+import { handlePostFixDiagnosticsFlow } from '../waza/waza';
 import { DiagnosticsManager } from './diagnosticsManager';
 import { SkillContextResolver } from './skillContextResolver';
 
