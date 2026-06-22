@@ -18,28 +18,22 @@ export class FixDiagnosticsCoordinator {
     if (!editor) {
       return;
     }
-
     const targetUri = editor.document.uri;
-    const initialText = editor.document.getText();
-
     const fixableDiagnostics = this.getFixableDiagnostics(targetUri, scopedDiagnostics);
     if (await this.hasNoFixableDiagnostics(fixableDiagnostics.length)) {
       return;
     }
-
     await this.openFixDiagnosticsChat(editor.document, fixableDiagnostics);
     this.diagnosticsManager.clearDiagnosticsForUri(targetUri);
-
+    const initialText = editor.document.getText();
     const hasImprovements = await this.waitForDocumentImprovements(targetUri, initialText);
     if (!hasImprovements) {
       return;
     }
-
     const skillContext = this.skillContextResolver.resolveSkillContext(targetUri);
     if (!skillContext) {
       return;
     }
-
     await handlePostFixDiagnosticsFlow(skillContext);
   }
 
@@ -73,9 +67,8 @@ export class FixDiagnosticsCoordinator {
     if (fixableDiagnosticsCount > 0) {
       return false;
     }
-
     const action = await vscode.window.showInformationMessage(
-      'Implement suggestions is unavailable for LLM analysis error diagnostics. Run Analyze again.',
+      'No fixable diagnostics found. Run Analyze again.',
       ACTION_ANALYZE_AGAIN,
     );
     if (action === ACTION_ANALYZE_AGAIN) {
@@ -110,7 +103,7 @@ export class FixDiagnosticsCoordinator {
         ` - line: ${startLine}${endLine !== startLine ? `-${endLine}` : ''}`,
         ` - lineText: ${lineText}`,
         ` - message: ${message || 'n/a'}`,
-        ...(shouldIncludeSuggestion ? [`  suggestion: ${suggestion}`] : []),
+        ...(shouldIncludeSuggestion ? ` - suggestion: ${suggestion}` : ''),
         `\n`
       ].join('\n');
     }).join('\n');
@@ -123,6 +116,7 @@ export class FixDiagnosticsCoordinator {
       '- line: 1-based line number where the diagnostic starts (or start-end for a multi-line range).',
       '- lineText: exact text currently present at the diagnostic start line in the target file.',
       '- message: diagnostic description explaining what is wrong and needs to be fixed.',
+      '',
       'Diagnostics:',
       payload,
     ].join('\n\n');

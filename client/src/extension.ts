@@ -70,9 +70,6 @@ class ExtensionRuntime {
 
   deactivate(): Thenable<void> | undefined {
     this.analysisCoordinator.dispose();
-    if (!this.client) {
-      return undefined;
-    }
     return this.client.stop();
   }
 
@@ -170,7 +167,6 @@ class ExtensionRuntime {
       { scheme: 'vscode-userdata', language: 'skill' },
       { scheme: 'vscode-userdata', language: 'instructions' },
     ];
-
     this.outputChannel.appendLine('[Code Actions] Registering code action provider');
     context.subscriptions.push(
       vscode.languages.registerCodeActionsProvider(documentSelector, {
@@ -189,7 +185,6 @@ class ExtensionRuntime {
     if (fixableDiagnostics.length === 0) {
       return [];
     }
-
     return fixableDiagnostics.map(diagnostic => {
       const action = new vscode.CodeAction(ACTION_FIX_DIAGNOSTICS, vscode.CodeActionKind.QuickFix);
       action.diagnostics = [diagnostic];
@@ -220,7 +215,7 @@ class ExtensionRuntime {
 
   private onDidCloseTextDocument(document: vscode.TextDocument): void {
     this.diagnosticsManager.handleDocumentClosed(document.uri);
-    this.analysisCoordinator?.handleDocumentClosed(document.uri);
+    this.analysisCoordinator.handleDocumentClosed(document.uri);
   }
 
   private registerModelHandlers(context: vscode.ExtensionContext): void {
@@ -232,7 +227,7 @@ class ExtensionRuntime {
   }
 
   private startLanguageClient(): void {
-    this.client?.start().then(() => {
+    this.client.start().then(() => {
       this.outputChannel.appendLine('[Activation] Language server started successfully');
     }).catch((err: Error) => {
       this.outputChannel.appendLine(`[Activation] Language server failed to start: ${err.message}`);
@@ -288,13 +283,11 @@ class ExtensionRuntime {
     const timeout = setTimeout(() => cts.cancel(), ExtensionRuntime.LLM_REQUEST_TIMEOUT_MS);
     try {
       const model = await this.modelPicker.selectModel();
-
       if (!model) {
         return { text: '{}', error: 'No language models available - sign in to GitHub Copilot' };
       } else {
         this.outputChannel.appendLine(`[LLM Proxy] Selected model: ${model.name} (${model.vendor}/${model.family})`);
       }
-
       const messages = this.buildLLMProxyMessages(request);
       const response = await model.sendRequest(messages, {}, cts.token);
       const text = await this.collectStreamedResponseText(response);
@@ -316,9 +309,7 @@ class ExtensionRuntime {
   }
 
   private buildLLMProxyMessages(request: LLMProxyRequest): vscode.LanguageModelChatMessage[] {
-    return [
-      vscode.LanguageModelChatMessage.User(request.systemPrompt + '\n\n' + request.prompt),
-    ];
+    return [vscode.LanguageModelChatMessage.User(request.systemPrompt + '\n\n' + request.prompt)];
   }
 
   private async collectStreamedResponseText(

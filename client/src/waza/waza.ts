@@ -17,8 +17,7 @@ import {
     WAZA_USER_GUIDE_FALLBACK,
 } from './wazaFallbackGuides';
 import {
-    PREFERRED_EVAL_FILE_NAME,
-    WAZA_CREATE_TIMEOUT_MS,
+    WAZA_CREATE_TIMEOUT_MS
 } from './wazaConstants';
 
 export type { SkillContext, TelemetryData } from './wazaTypes';
@@ -95,7 +94,7 @@ class WazaOrchestrator {
     private async handleWazaCreateEvalCommand(obj: unknown): Promise<void> {
         const skillContext = this.contextResolver.resolveSkillContext(obj);
         if (!skillContext) {
-            void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to create an eval scaffold.');
+            vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to create an eval scaffold.');
             return;
         }
 
@@ -126,7 +125,7 @@ class WazaOrchestrator {
     private async handleWazaRunEvalCommand(obj: unknown): Promise<void> {
         const skillContext = this.contextResolver.resolveSkillContext(obj);
         if (!skillContext) {
-            void vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to run Waza evaluation.');
+            vscode.window.showWarningMessage('Open a SKILL.md file (or select a customization item) to run Waza evaluation.');
             return;
         }
 
@@ -239,7 +238,6 @@ class WazaOrchestrator {
             await this.handleExistingEvalAfterFix(context, evalPath);
             return;
         }
-
         await this.handleMissingEvalAfterFix(context);
     }
 
@@ -247,7 +245,6 @@ class WazaOrchestrator {
         if (!this.deps) {
             throw new Error('Waza module is not initialized');
         }
-
         return this.deps;
     }
 
@@ -262,37 +259,6 @@ class WazaOrchestrator {
 
     private async installManagedWazaBinary(): Promise<void> {
         await vscode.commands.executeCommand('chatCustomizationsEvaluations.wazaDownloadBinary');
-    }
-
-    private isWazaSkillLookupError(output: string): boolean {
-        const lower = output.toLowerCase();
-        return lower.includes('finding skill') && lower.includes('not found in workspace');
-    }
-
-    private async runWazaScaffoldViaTempWorkspace(context: SkillContext, scaffoldRoot: string): Promise<CommandResult> {
-        const { extensionContext, outputChannel } = this.requireDeps();
-        const tempBase = path.join(extensionContext.globalStorageUri.fsPath, 'tmp-scaffold');
-        await fs.promises.mkdir(tempBase, { recursive: true });
-
-        const tempRoot = await fs.promises.mkdtemp(path.join(tempBase, 'waza-'));
-        const tempSkillDir = path.join(tempRoot, 'skills', context.skillName);
-        const targetEvalPath = path.join(scaffoldRoot, 'evals', context.skillName, PREFERRED_EVAL_FILE_NAME);
-
-        try {
-            await fs.promises.mkdir(tempSkillDir, { recursive: true });
-            await fs.promises.copyFile(context.skillFilePath, path.join(tempSkillDir, 'SKILL.md'));
-
-            outputChannel.appendLine(`[Waza] Temp scaffold root: ${tempRoot}`);
-            outputChannel.appendLine(`[Waza] Target eval output: ${targetEvalPath}`);
-
-            return await this.runWazaCommand(
-                ['new', 'eval', context.skillName, '--output', targetEvalPath],
-                tempRoot,
-                WAZA_CREATE_TIMEOUT_MS,
-            );
-        } finally {
-            await fs.promises.rm(tempRoot, { recursive: true, force: true });
-        }
     }
 
     private async runWazaCommand(args: string[], cwd: string, timeoutMs?: number): Promise<CommandResult> {
@@ -647,10 +613,10 @@ class WazaOrchestrator {
         outputChannel.appendLine(`[Waza] Command: ${this.getWazaCommand()} new eval ${context.skillName}`);
         outputChannel.appendLine(`[Waza] CWD: ${scaffoldCwd}`);
 
-        const { result: finalResult, usedTemporaryWorkspaceFallback } = await this.runCreateEvalScaffoldCommand(context, scaffoldCwd);
+        const { result: finalResult } = await this.runCreateEvalScaffoldCommand(context, scaffoldCwd);
 
         if (finalResult.exitCode !== 0) {
-            this.logAndNotifyCreateScaffoldFailure(finalResult, usedTemporaryWorkspaceFallback);
+            this.logAndNotifyCreateScaffoldFailure(finalResult);
             return undefined;
         }
 
@@ -668,25 +634,16 @@ class WazaOrchestrator {
     private async runCreateEvalScaffoldCommand(
         context: SkillContext,
         scaffoldCwd: string,
-    ): Promise<{ result: CommandResult; usedTemporaryWorkspaceFallback: boolean }> {
-        const { outputChannel } = this.requireDeps();
+    ): Promise<{ result: CommandResult }> {
         const firstAttempt = await this.runWazaCommand(
             ['new', 'eval', context.skillName],
             scaffoldCwd,
             WAZA_CREATE_TIMEOUT_MS,
         );
-
-        const firstAttemptText = `${firstAttempt.stderr}\n${firstAttempt.stdout}`;
-        if (firstAttempt.exitCode === 0 || !this.isWazaSkillLookupError(firstAttemptText)) {
-            return { result: firstAttempt, usedTemporaryWorkspaceFallback: false };
-        }
-
-        outputChannel.appendLine('[Waza] Workspace skill lookup failed; retrying with temporary canonical workspace...');
-        const fallbackResult = await this.runWazaScaffoldViaTempWorkspace(context, scaffoldCwd);
-        return { result: fallbackResult, usedTemporaryWorkspaceFallback: true };
+        return { result: firstAttempt }
     }
 
-    private logAndNotifyCreateScaffoldFailure(result: CommandResult, usedTemporaryWorkspaceFallback: boolean): void {
+    private logAndNotifyCreateScaffoldFailure(result: CommandResult): void {
         const { outputChannel } = this.requireDeps();
         outputChannel.appendLine(`[Waza] Rval scaffold failed\n${result.stderr || result.stdout}`);
         void vscode.window.showErrorMessage('Failed to create Waza eval scaffold. See "Chat Customizations Evaluations" output for details. Error: ' + (result.stderr || result.stdout));
