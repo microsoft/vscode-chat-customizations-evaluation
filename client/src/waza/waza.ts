@@ -445,7 +445,7 @@ class WazaOrchestrator {
                 actions.push('Open Detailed Output');
             }
             actions.push('Open Recommendation');
-            const action = await vscode.window.showErrorMessage(
+            const action = await vscode.window.showInformationMessage(
                 'Waza evaluation failed. A recommendation document with AI-powered fix suggestions has been generated.',
                 ...actions,
             );
@@ -462,7 +462,7 @@ class WazaOrchestrator {
                 actions.push('Open Detailed Output');
             }
             actions.push('Show Output');
-            const action = await vscode.window.showErrorMessage(
+            const action = await vscode.window.showInformationMessage(
                 'Waza evaluation failed. See "Chat Customizations Evaluations" output for details.',
                 ...actions,
             );
