@@ -33,7 +33,9 @@ class ExtensionRuntime {
   private static readonly LLM_REQUEST_TIMEOUT_MS = 30_000;
 
   private client!: LanguageClient;
-  private outputChannel!: vscode.OutputChannel;
+  // Must be a log channel: vscode-languageclient v10 logs through the level
+  // methods (info/warn/error) that only LogOutputChannel provides.
+  private outputChannel!: vscode.LogOutputChannel;
   private modelPicker!: ModelPicker;
   private extensionContext!: vscode.ExtensionContext;
   private analysisCoordinator!: AnalysisCoordinator;
@@ -45,7 +47,7 @@ class ExtensionRuntime {
 
   activate(context: vscode.ExtensionContext): void {
 
-    this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations');
+    this.outputChannel = vscode.window.createOutputChannel('Chat Customizations Evaluations', { log: true });
     const serverOptions = this.createServerOptions(context);
     const clientOptions = this.createClientOptions();
     this.client = new LanguageClient(
