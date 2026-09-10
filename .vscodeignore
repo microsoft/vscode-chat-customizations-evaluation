@@ -2,6 +2,7 @@
 .vscode-test/**
 src/**
 client/src/**
+client/test/**
 client/node_modules/**
 node_modules/**
 !out/node_modules/**
