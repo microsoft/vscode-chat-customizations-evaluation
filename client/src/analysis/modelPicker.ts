@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 
+interface ConfiguredModelSelector {
+    vendor?: string;
+    family?: string;
+}
+
 export class ModelPicker {
 
     private cachedModel: vscode.LanguageModelChat | undefined;
@@ -38,11 +43,15 @@ export class ModelPicker {
             return undefined;
         }
 
-        const configured = vscode.workspace.getConfiguration('chatCustomizationsEvaluations').get<string>('model', '').trim();
-        if (configured) {
+        const configured = vscode.workspace.getConfiguration('chatCustomizationsEvaluations').get<string>('model', '');
+        const selector = this.parseConfiguredModel(configured);
+        if (selector) {
+            const label = selector.vendor
+                ? `User model matches (${selector.vendor}/${selector.family ?? '*'})`
+                : 'User model matches';
             const userSelected = await this.selectFirstModel(
-                () => vscode.lm.selectChatModels({ family: configured }),
-                'User model matches',
+                () => vscode.lm.selectChatModels(selector),
+                label,
             );
             if (userSelected) {
                 return userSelected;
@@ -69,6 +78,32 @@ export class ModelPicker {
         }
 
         return this.selectFirstModel(() => vscode.lm.selectChatModels(), 'Any models');
+    }
+
+    /**
+     * Parses the `chatCustomizationsEvaluations.model` setting.
+     * Accepts a bare family (`claude-sonnet-5`) or a vendor-scoped
+     * `vendor:family` value (`copilot:claude-sonnet-5`). A trailing empty
+     * family (`copilot:`) selects any model from that vendor.
+     */
+    private parseConfiguredModel(configured: string): ConfiguredModelSelector | undefined {
+        const trimmed = configured.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        const separatorIndex = trimmed.indexOf(':');
+        if (separatorIndex === -1) {
+            return { family: trimmed };
+        }
+
+        const vendor = trimmed.slice(0, separatorIndex).trim();
+        const family = trimmed.slice(separatorIndex + 1).trim();
+        if (!vendor) {
+            return family ? { family } : undefined;
+        }
+
+        return family ? { vendor, family } : { vendor };
     }
 
     private async selectFirstModel(
