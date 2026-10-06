@@ -2,7 +2,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import type {
-    AnalysisDocumentSnapshot, AnalyzeRequest
+    AnalysisDocumentSnapshot, AnalyzeRequest, CustomDiagnosticConfig
 } from './types';
 import { ACTION_ANALYZE_AGAIN, ACTION_FIX_DIAGNOSTICS } from './strings';
 import { DiagnosticsManager } from './diagnosticsManager';
@@ -203,7 +203,8 @@ export class AnalysisCoordinator {
                     }, AnalysisCoordinator.ANALYSIS_PROGRESS_UPDATE_INTERVAL_MS);
 
                     try {
-                        const analyzeRequest: AnalyzeRequest = { uri: uri.toString(), previousDiagnosticMessages: previousDiagnostics };
+                        const customDiagnostics = vscode.workspace.getConfiguration('chatCustomizationsEvaluations').get<CustomDiagnosticConfig[]>('customDiagnostics') || [];
+                        const analyzeRequest: AnalyzeRequest = { uri: uri.toString(), customDiagnostics, previousDiagnosticMessages: previousDiagnostics };
                         return await this.client.sendRequest<{ duration: number; resultCount: number }>('chatCustomizationsEvaluations/analyze', analyzeRequest);
                     } finally {
                         clearInterval(interval);

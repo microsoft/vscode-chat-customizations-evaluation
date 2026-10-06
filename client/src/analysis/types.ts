@@ -18,6 +18,7 @@ export interface CustomDiagnosticConfig {
 
 export interface AnalyzeRequest {
   uri: string;
+  customDiagnostics?: CustomDiagnosticConfig[];
   previousDiagnosticMessages?: string[];
 }
 
