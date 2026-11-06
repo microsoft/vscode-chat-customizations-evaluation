@@ -68,7 +68,7 @@
         "chatCustomizationsEvaluations.model": {
           "type": "string",
           "default": "claude-sonnet-4.6",
-          "description": "Model to use for analysis (e.g., claude-sonnet-4.6, gpt-4o, gpt-4.1, etc). Defaults to claude-sonnet-4.6."
+          "description": "Model to use for analysis. Accepts a model family (e.g., claude-sonnet-4.6, gpt-4o, gpt-4.1) or a vendor-scoped value (e.g., copilot:claude-sonnet-5) to disambiguate when multiple providers register the same family. Defaults to claude-sonnet-4.6."
         }
       }
     },
