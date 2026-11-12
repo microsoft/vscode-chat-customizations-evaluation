@@ -57,7 +57,9 @@ export class AnalysisCoordinator {
         this.clearQueuedAnalysisTimeout(uriKey);
 
         const snapshot = await this.getCurrentAnalysisSnapshot(uri);
-        if (snapshot.isFresh && snapshot.diagnostics.length > 0) {
+        const hasErrorDiagnostics = snapshot.diagnostics.some(diagnostic =>
+            this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
+        if (snapshot.isFresh && snapshot.diagnostics.length > 0 && !hasErrorDiagnostics) {
             this.clearQueuedAnalysis(uriKey);
             this.updateIsAnalyzingContext();
             await this.focusExistingDiagnostics(uri);
@@ -91,7 +93,9 @@ export class AnalysisCoordinator {
         for (const uri of uris) {
             const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
             const uriKey = uri.toString();
-            if (diagnostics.length > 0) {
+            const hasErrorDiagnostics = diagnostics.some(diagnostic =>
+                this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
+            if (diagnostics.length > 0 && !hasErrorDiagnostics) {
                 this.urisWithDiagnostics.add(uriKey);
             } else {
                 this.urisWithDiagnostics.delete(uriKey);
@@ -210,10 +214,17 @@ export class AnalysisCoordinator {
                     }
                 }
             );
-            this.recordAnalysisSnapshot(snapshot.document);
+            const diagnostics = this.diagnosticsManager.getDiagnosticsForUri(uri);
+            const hasErrorDiagnostics = diagnostics.some(diagnostic =>
+                this.diagnosticsManager.hasErrorDiagnostics(diagnostic));
+            if (!hasErrorDiagnostics) {
+                this.recordAnalysisSnapshot(snapshot.document);
+            }
             await vscode.window.showTextDocument(snapshot.document, { preview: false, preserveFocus: false });
             await this.completeAnalysis(uri, result);
-            this.accumulatePreviousDiagnostics(uri);
+            if (!hasErrorDiagnostics) {
+                this.accumulatePreviousDiagnostics(uri);
+            }
         } catch (error) {
             this.clearQueuedAnalysis(uri.toString());
             this.updateIsAnalyzingContext();
